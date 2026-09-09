@@ -1,0 +1,32 @@
+# Build products
+/build/
+/out/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/compile_commands.json
+
+# Qt and IDE state
+/.qt/
+/.qtcreator/
+/CMakeUserPresets.json
+*.user
+*.user.*
+*.autosave
+
+# Local configuration and secrets
+/config/local/
+/config/*.local.json
+/config/*.secrets.json
+*.key
+*.pem
+.env
+.env.*
+
+# Recordings and runtime artifacts
+/recordings/
+/logs/
+*.mp4
+*.mkv
+*.flv
+*.ts
