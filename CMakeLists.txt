@@ -118,6 +118,8 @@ qt_add_executable(StaxStudioTests
     core/source/Source.h
     core/transition/TransitionSettings.h
     core/audio/mixer/MixerChannel.h
+    ui/controllers/StudioModels.cpp
+    ui/controllers/StudioModels.h
 )
 
 target_include_directories(StaxStudioTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

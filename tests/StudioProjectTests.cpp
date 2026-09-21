@@ -1,5 +1,6 @@
 #include "core/project/StudioProject.h"
 #include "core/project/StudioRepository.h"
+#include "ui/controllers/StudioModels.h"
 
 #include <QFile>
 #include <QTemporaryDir>
@@ -16,6 +17,9 @@ private slots:
     void persistsAndRestoresProject();
     void recoversFromInvalidConfiguration();
     void recoversFromUnsupportedSchema();
+    void notifiesSceneModelMutations();
+    void notifiesSourceModelMutations();
+    void keepsModelsConsistentThroughRepeatedLifecycleChanges();
 };
 
 void StudioProjectTests::createsAndSelectsScenes()
@@ -132,6 +136,84 @@ void StudioProjectTests::recoversFromUnsupportedSchema()
     const StudioProject recovered = repository.load();
     QCOMPARE(recovered.profileName, QStringLiteral("My Studio"));
     QVERIFY(recovered.activeScene() != nullptr);
+}
+
+void StudioProjectTests::notifiesSceneModelMutations()
+{
+    StudioProject project = StudioProject::createDefault();
+    SceneListModel model(&project);
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+    QSignalSpy moved(&model, &QAbstractItemModel::rowsMoved);
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+
+    const QString id = model.addScene(QStringLiteral("Test Scene"));
+    QCOMPARE(model.rowCount(), 4);
+    QCOMPARE(inserted.count(), 1);
+    QVERIFY(model.renameScene(id, QStringLiteral("Gameplay")));
+    QCOMPARE(changed.count(), 1);
+    QVERIFY(model.moveScene(id, -1));
+    QCOMPARE(moved.count(), 1);
+    QVERIFY(model.removeScene(id));
+    QCOMPARE(model.rowCount(), 3);
+    QCOMPARE(removed.count(), 1);
+}
+
+void StudioProjectTests::notifiesSourceModelMutations()
+{
+    StudioProject project = StudioProject::createDefault();
+    QString selectedItemId;
+    SceneItemListModel model(&project, &selectedItemId);
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+    QSignalSpy moved(&model, &QAbstractItemModel::rowsMoved);
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+
+    const QString firstItemId = model.addSource(SourceType::WindowCapture, QStringLiteral("Window"));
+    const QString secondItemId = model.addSource(SourceType::Image, QStringLiteral("Artwork"));
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(inserted.count(), 2);
+    const QString sourceId = project.activeScene()->items.first().sourceId;
+    QVERIFY(model.renameSource(sourceId, QStringLiteral("Primary Window")));
+    QVERIFY(model.setItemVisible(firstItemId, false));
+    QVERIFY(model.setItemLocked(firstItemId, true));
+    QCOMPARE(changed.count(), 3);
+    QVERIFY(model.moveItem(secondItemId, -1));
+    QCOMPARE(moved.count(), 1);
+    QVERIFY(model.removeItem(firstItemId));
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(removed.count(), 1);
+}
+
+void StudioProjectTests::keepsModelsConsistentThroughRepeatedLifecycleChanges()
+{
+    StudioProject project = StudioProject::createDefault();
+    QString selectedItemId;
+    SceneListModel scenes(&project);
+    SceneItemListModel items(&project, &selectedItemId);
+
+    for (int cycle = 0; cycle < 25; ++cycle) {
+        const QString sceneId = scenes.addScene(QStringLiteral("Cycle %1").arg(cycle));
+        project.activeSceneId = sceneId;
+        scenes.notifyActiveSceneChanged();
+        items.resetForActiveScene();
+
+        const QString windowItemId = items.addSource(SourceType::WindowCapture, QStringLiteral("Window %1").arg(cycle));
+        const QString imageItemId = items.addSource(SourceType::Image, QStringLiteral("Image %1").arg(cycle));
+        QVERIFY(items.setItemVisible(windowItemId, false));
+        QVERIFY(items.setItemLocked(windowItemId, true));
+        QVERIFY(items.moveItem(imageItemId, -1));
+        QVERIFY(items.removeItem(windowItemId));
+        QCOMPARE(items.rowCount(), 1);
+
+        project.activeSceneId = project.scenes.first().id;
+        scenes.notifyActiveSceneChanged();
+        items.resetForActiveScene();
+        QVERIFY(scenes.removeScene(sceneId));
+        QCOMPARE(project.sceneIndex(sceneId), -1);
+        QVERIFY(project.activeScene() != nullptr);
+        QCOMPARE(items.rowCount(), project.activeScene()->items.size());
+    }
 }
 
 QTEST_APPLESS_MAIN(StudioProjectTests)

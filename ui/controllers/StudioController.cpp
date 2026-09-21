@@ -17,20 +17,55 @@ QString StudioController::transitionType() const { return project_.transition.ty
 int StudioController::transitionDurationMs() const { return project_.transition.durationMs; }
 QString StudioController::statusMessage() const { return statusMessage_; }
 
-void StudioController::addScene(const QString &name) { project_.addScene(name); refresh(true); }
-void StudioController::renameScene(const QString &id, const QString &name) { if (project_.renameScene(id, name)) refresh(); }
-void StudioController::deleteScene(const QString &id) { if (project_.removeScene(id)) { selectedItemId_.clear(); refresh(true); emit selectedItemChanged(); } else showUnavailableAction(QStringLiteral("Keep at least one scene in the studio.")); }
-void StudioController::selectScene(const QString &id) { if (project_.sceneIndex(id) >= 0 && project_.activeSceneId != id) { project_.activeSceneId = id; selectedItemId_.clear(); refresh(true); emit selectedItemChanged(); } }
-void StudioController::moveScene(const QString &id, int direction) { if (project_.moveScene(id, direction)) refresh(); }
-void StudioController::addSource(const QString &typeName, const QString &name) { bool ok = false; const SourceType type = sourceTypeFromName(typeName, &ok); if (!ok) return; Source &source = project_.addSource(type); if (!name.trimmed().isEmpty()) project_.renameSource(source.id, name); refresh(true); }
-void StudioController::renameSource(const QString &id, const QString &name) { if (project_.renameSource(id, name)) refresh(); }
-void StudioController::removeSceneItem(const QString &id) { if (project_.removeSceneItem(id)) { if (selectedItemId_ == id) { selectedItemId_.clear(); emit selectedItemChanged(); } refresh(true); } }
-void StudioController::moveSceneItem(const QString &id, int direction) { if (project_.moveSceneItem(id, direction)) refresh(true); }
-void StudioController::setItemVisible(const QString &id, bool visible) { if (project_.setSceneItemVisible(id, visible)) refresh(true); }
-void StudioController::setItemLocked(const QString &id, bool locked) { if (project_.setSceneItemLocked(id, locked)) refresh(true); }
-void StudioController::selectItem(const QString &id) { if (selectedItemId_ == id) return; selectedItemId_ = id; sceneItemsModel_.refresh(); emit selectedItemChanged(); }
-void StudioController::setMixerVolume(const QString &id, double volume) { if (project_.setMixerVolume(id, volume)) refresh(); }
-void StudioController::setMixerMuted(const QString &id, bool muted) { if (project_.setMixerMuted(id, muted)) refresh(); }
+void StudioController::addScene(const QString &name) { scenesModel_.addScene(name); refresh(); }
+void StudioController::renameScene(const QString &id, const QString &name) { if (scenesModel_.renameScene(id, name)) refresh(); }
+void StudioController::deleteScene(const QString &id)
+{
+    const QString previousActiveSceneId = project_.activeSceneId;
+    if (!scenesModel_.removeScene(id)) { showUnavailableAction(QStringLiteral("Keep at least one scene in the studio.")); return; }
+    if (selectedItemId_.isEmpty() == false) { selectedItemId_.clear(); emit selectedItemChanged(); }
+    scenesModel_.notifyActiveSceneChanged();
+    if (project_.activeSceneId != previousActiveSceneId) sceneItemsModel_.resetForActiveScene();
+    refresh();
+}
+void StudioController::selectScene(const QString &id)
+{
+    if (project_.sceneIndex(id) < 0 || project_.activeSceneId == id) return;
+    project_.activeSceneId = id;
+    if (selectedItemId_.isEmpty() == false) { selectedItemId_.clear(); emit selectedItemChanged(); }
+    scenesModel_.notifyActiveSceneChanged();
+    sceneItemsModel_.resetForActiveScene();
+    refresh();
+}
+void StudioController::moveScene(const QString &id, int direction) { if (scenesModel_.moveScene(id, direction)) refresh(); }
+void StudioController::addSource(const QString &typeName, const QString &name)
+{
+    bool ok = false;
+    const SourceType type = sourceTypeFromName(typeName, &ok);
+    if (!ok) return;
+    sceneItemsModel_.addSource(type, name);
+    refresh();
+}
+void StudioController::renameSource(const QString &id, const QString &name) { if (sceneItemsModel_.renameSource(id, name)) refresh(); }
+void StudioController::removeSceneItem(const QString &id)
+{
+    if (!sceneItemsModel_.removeItem(id)) return;
+    if (selectedItemId_ == id) { selectedItemId_.clear(); emit selectedItemChanged(); }
+    refresh();
+}
+void StudioController::moveSceneItem(const QString &id, int direction) { if (sceneItemsModel_.moveItem(id, direction)) refresh(); }
+void StudioController::setItemVisible(const QString &id, bool visible) { if (sceneItemsModel_.setItemVisible(id, visible)) refresh(); }
+void StudioController::setItemLocked(const QString &id, bool locked) { if (sceneItemsModel_.setItemLocked(id, locked)) refresh(); }
+void StudioController::selectItem(const QString &id)
+{
+    if (selectedItemId_ == id) return;
+    const QString previousId = selectedItemId_;
+    selectedItemId_ = id;
+    sceneItemsModel_.notifySelectionChanged(previousId, selectedItemId_);
+    emit selectedItemChanged();
+}
+void StudioController::setMixerVolume(const QString &id, double volume) { if (mixerModel_.setVolume(id, volume)) refresh(); }
+void StudioController::setMixerMuted(const QString &id, bool muted) { if (mixerModel_.setMuted(id, muted)) refresh(); }
 void StudioController::setTransitionType(const QString &type) { project_.transition.type = type == QStringLiteral("Cut") ? TransitionType::Cut : TransitionType::Fade; refresh(); }
 void StudioController::setTransitionDurationMs(int value) { project_.transition.durationMs = qBound(50, value, 10000); refresh(); }
 void StudioController::setProfileName(const QString &name) { const QString trimmed = name.trimmed(); if (!trimmed.isEmpty()) { project_.profileName = trimmed; refresh(); } }
@@ -38,8 +73,8 @@ void StudioController::showUnavailableAction(const QString &action) { statusMess
 
 void StudioController::refresh(bool sceneChanged)
 {
-    project_.normalize(); save(); scenesModel_.refresh(); mixerModel_.refresh();
-    if (sceneChanged) sceneItemsModel_.refresh(); else sceneItemsModel_.refresh();
+    Q_UNUSED(sceneChanged)
+    save();
     emit projectChanged();
 }
 
