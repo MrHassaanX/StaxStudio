@@ -78,7 +78,7 @@ StudioProject StudioRepository::load() const
     }
     const QJsonObject transition = root.value("transition").toObject();
     project.transition.type = transition.value("type").toString() == "Cut" ? TransitionType::Cut : TransitionType::Fade;
-    project.transition.durationMs = qBound(0, transition.value("durationMs").toInt(300), 10000);
+    project.transition.durationMs = qBound(50, transition.value("durationMs").toInt(300), 10000);
     if (project.profileId.isEmpty() || project.profileName.trimmed().isEmpty() || project.mixerChannels.isEmpty()) return StudioProject::createDefault();
     project.normalize();
     return project;

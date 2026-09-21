@@ -61,6 +61,12 @@ qt_add_qml_module(StaxStudio
         ui/qml/components/StudioIcon.qml
         ui/qml/components/StudioPanel.qml
         ui/qml/components/StudioSectionHeader.qml
+        ui/qml/components/StudioComboBox.qml
+        ui/qml/components/StudioDialog.qml
+        ui/qml/components/StudioMenu.qml
+        ui/qml/components/StudioMenuItem.qml
+        ui/qml/components/StudioSlider.qml
+        ui/qml/components/StudioTextField.qml
 )
 
 target_include_directories(StaxStudio

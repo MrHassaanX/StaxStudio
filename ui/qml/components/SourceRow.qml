@@ -17,7 +17,7 @@ Rectangle {
     signal lockedRequested(bool value)
     signal removeRequested()
     signal moveRequested(int direction)
-    implicitHeight: 52
+    height: 52
     radius: 5
     color: selected ? "#213B43" : (mouse.containsMouse ? "#1D2D33" : "transparent")
     border.color: selected ? "#397485" : "transparent"
@@ -32,12 +32,13 @@ Rectangle {
         IconButton { iconName: "more"; tooltip: "Source options"; onClicked: options.open() }
     }
     MouseArea { id: mouse; anchors.left: parent.left; anchors.right: controls.left; anchors.top: parent.top; anchors.bottom: parent.bottom; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.selectedRequested(); onDoubleClicked: root.renameRequested() }
-    Menu {
+    StudioMenu {
         id: options
-        MenuItem { text: "Rename"; onTriggered: root.renameRequested() }
-        MenuItem { text: "Move layer forward"; onTriggered: root.moveRequested(1) }
-        MenuItem { text: "Move layer backward"; onTriggered: root.moveRequested(-1) }
+        StudioMenuItem { text: "Rename"; onTriggered: root.renameRequested() }
+        StudioMenuItem { text: "Source properties"; enabled: false }
+        StudioMenuItem { text: "Move layer forward"; onTriggered: root.moveRequested(1) }
+        StudioMenuItem { text: "Move layer backward"; onTriggered: root.moveRequested(-1) }
         MenuSeparator { }
-        MenuItem { text: "Remove from scene"; onTriggered: root.removeRequested() }
+        StudioMenuItem { text: "Remove from scene"; destructive: true; onTriggered: root.removeRequested() }
     }
 }

@@ -34,7 +34,7 @@ public:
     Q_INVOKABLE void deleteScene(const QString &sceneId);
     Q_INVOKABLE void selectScene(const QString &sceneId);
     Q_INVOKABLE void moveScene(const QString &sceneId, int direction);
-    Q_INVOKABLE void addSource(const QString &typeName);
+    Q_INVOKABLE void addSource(const QString &typeName, const QString &name = {});
     Q_INVOKABLE void renameSource(const QString &sourceId, const QString &name);
     Q_INVOKABLE void removeSceneItem(const QString &itemId);
     Q_INVOKABLE void moveSceneItem(const QString &itemId, int direction);

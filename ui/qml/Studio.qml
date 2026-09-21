@@ -11,6 +11,7 @@ Item {
     property string renameSourceId: ""
     property string deleteSceneId: ""
     property string removeItemId: ""
+    property string selectedSourceType: ""
 
     Rectangle { anchors.fill: parent; color: "#0F171A" }
 
@@ -28,17 +29,31 @@ Item {
                 Text { text: "Studio"; color: "#F5F8F8"; font.pixelSize: 22; font.weight: Font.DemiBold }
                 Text { text: "Arrange your program, then connect media when you are ready."; color: "#829399"; font.pixelSize: 12 }
             }
-            Button {
-                Layout.preferredWidth: 206
+            Rectangle {
+                Layout.preferredWidth: 180
                 Layout.preferredHeight: 38
-                background: Rectangle { radius: 5; color: parent.hovered ? "#203137" : "#1B292E"; border.color: "#30434A" }
-                contentItem: Row { anchors.fill: parent; anchors.margins: 10; spacing: 8
+                radius: 5
+                color: "#1B292E"
+                border.color: "#30434A"
+                Row { anchors.fill: parent; anchors.margins: 10; spacing: 8
                     Rectangle { width: 7; height: 7; radius: 4; anchors.verticalCenter: parent.verticalCenter; color: root.accent }
-                    Text { anchors.verticalCenter: parent.verticalCenter; width: parent.width - 20; text: studioController.profileName; color: "#DCE7E8"; font.pixelSize: 12; elide: Text.ElideRight }
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: "PROJECT"; color: "#7F959A"; font.pixelSize: 10; font.weight: Font.DemiBold }
+                    Text { anchors.verticalCenter: parent.verticalCenter; width: parent.width - 70; text: studioController.profileName; color: "#DCE7E8"; font.pixelSize: 12; elide: Text.ElideRight }
                 }
-                onClicked: profileDialog.open()
-                ToolTip.visible: hovered
-                ToolTip.text: "Rename studio profile"
+            }
+            Rectangle {
+                Layout.preferredWidth: 164
+                Layout.preferredHeight: 38
+                radius: 5
+                color: "#172328"
+                border.color: "#2F4148"
+                Row { anchors.fill: parent; anchors.margins: 10; spacing: 7
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: "SMART MODE"; color: "#A9B9BD"; font.pixelSize: 10; font.weight: Font.DemiBold }
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: "Not configured"; color: "#74878D"; font.pixelSize: 10 }
+                }
+                ToolTip.visible: smartModeArea.containsMouse
+                ToolTip.text: "Hardware recommendations will be available after device setup."
+                MouseArea { id: smartModeArea; anchors.fill: parent; hoverEnabled: true }
             }
         }
 
@@ -91,7 +106,7 @@ Item {
                         spacing: 10
                         StudioSectionHeader {
                             title: "Sources"; subtitle: "Layers in " + studioController.activeSceneName
-                            IconButton { iconName: "add"; tooltip: "Add source"; onClicked: addSourceMenu.open() }
+                            IconButton { iconName: "add"; tooltip: "Add source"; onClicked: { root.selectedSourceType = ""; sourceNameField.text = ""; sourcePickerDialog.open() } }
                         }
                         ListView {
                             id: sourcesView
@@ -254,68 +269,88 @@ Item {
                         anchors.fill: parent
                         spacing: 8
                         StudioSectionHeader { title: "Transition"; subtitle: "Between scenes" }
-                        ComboBox { Layout.fillWidth: true; Layout.preferredHeight: 34; model: ["Cut", "Fade"]; currentIndex: studioController.transitionType === "Cut" ? 0 : 1; onActivated: studioController.setTransitionType(currentText) }
+                        StudioComboBox { Layout.fillWidth: true; model: ["Cut", "Fade"]; currentIndex: studioController.transitionType === "Cut" ? 0 : 1; onActivated: studioController.setTransitionType(currentText) }
                         RowLayout { Layout.fillWidth: true; visible: studioController.transitionType === "Fade"
                             Text { text: "Duration"; color: "#AAB9BC"; font.pixelSize: 11 }
                             Item { Layout.fillWidth: true }
                             Text { text: studioController.transitionDurationMs + " ms"; color: "#D5E0E1"; font.pixelSize: 11 }
                         }
-                        Slider { Layout.fillWidth: true; visible: studioController.transitionType === "Fade"; from: 0; to: 2000; stepSize: 50; value: studioController.transitionDurationMs; onMoved: studioController.setTransitionDurationMs(value) }
+                        StudioSlider { Layout.fillWidth: true; visible: studioController.transitionType === "Fade"; from: 50; to: 2000; stepSize: 50; value: studioController.transitionDurationMs; onMoved: studioController.setTransitionDurationMs(value) }
                     }
                 }
                 StudioPanel {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 180
+                    Layout.preferredHeight: 214
                     color: "#172529"
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 8
                         StudioSectionHeader { title: "Controls"; subtitle: "Output is not connected" }
-                        StudioButton { Layout.fillWidth: true; text: "Start streaming"; enabled: false }
-                        StudioButton { Layout.fillWidth: true; text: "Start recording"; enabled: false }
-                        StudioButton { Layout.fillWidth: true; text: "Record + stream"; enabled: false }
+                        StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Start streaming"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
+                        StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Start recording"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
+                        StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Record + stream"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
                     }
                 }
             }
         }
     }
 
-    Menu {
-        id: addSourceMenu
-        title: "Add placeholder source"
-        Repeater { model: ["Display Capture", "Window Capture", "Game Capture", "Webcam", "Image", "Text", "Microphone", "Desktop Audio", "Browser Source", "Media Source"]
-            delegate: MenuItem { required property string modelData; text: modelData; onTriggered: studioController.addSource(modelData) }
+    StudioDialog {
+        id: sceneDialog; modal: true; title: "Create scene"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
+        onOpened: { sceneNameField.text = ""; sceneNameField.forceActiveFocus(); standardButton(Dialog.Ok).enabled = false }
+        onAccepted: { if (sceneNameField.text.trim().length > 0) studioController.addScene(sceneNameField.text) }
+        contentItem: ColumnLayout { implicitWidth: 320; spacing: 8
+            Text { text: "Scene name"; color: "#B6C6C9"; font.pixelSize: 12 }
+            StudioTextField { id: sceneNameField; Layout.fillWidth: true; placeholderText: "Gameplay"; selectByMouse: true; onTextChanged: sceneDialog.standardButton(Dialog.Ok).enabled = text.trim().length > 0 }
         }
     }
-    Dialog {
-        id: sceneDialog; modal: true; title: "Create scene"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
-        onAccepted: studioController.addScene(sceneNameField.text)
-        contentItem: TextField { id: sceneNameField; placeholderText: "Scene name"; selectByMouse: true; implicitWidth: 300 }
-    }
-    Dialog {
+    StudioDialog {
         id: renameSceneDialog; modal: true; title: "Rename scene"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
-        onAccepted: studioController.renameScene(root.renameSceneId, renameSceneField.text)
-        contentItem: TextField { id: renameSceneField; placeholderText: "Scene name"; selectByMouse: true; implicitWidth: 300 }
+        onOpened: { renameSceneField.forceActiveFocus(); renameSceneDialog.standardButton(Dialog.Ok).enabled = renameSceneField.text.trim().length > 0 }
+        onAccepted: { if (renameSceneField.text.trim().length > 0) studioController.renameScene(root.renameSceneId, renameSceneField.text) }
+        contentItem: StudioTextField { id: renameSceneField; placeholderText: "Scene name"; selectByMouse: true; implicitWidth: 300 }
     }
-    Dialog {
+    StudioDialog {
         id: renameSourceDialog; modal: true; title: "Rename source"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
-        onAccepted: studioController.renameSource(root.renameSourceId, renameSourceField.text)
-        contentItem: TextField { id: renameSourceField; placeholderText: "Source name"; selectByMouse: true; implicitWidth: 300 }
+        onOpened: { renameSourceField.forceActiveFocus(); renameSourceDialog.standardButton(Dialog.Ok).enabled = renameSourceField.text.trim().length > 0 }
+        onAccepted: { if (renameSourceField.text.trim().length > 0) studioController.renameSource(root.renameSourceId, renameSourceField.text) }
+        contentItem: StudioTextField { id: renameSourceField; placeholderText: "Source name"; selectByMouse: true; implicitWidth: 300 }
     }
-    Dialog {
-        id: profileDialog; modal: true; title: "Rename profile"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
-        onOpened: profileNameField.text = studioController.profileName
-        onAccepted: studioController.setProfileName(profileNameField.text)
-        contentItem: TextField { id: profileNameField; placeholderText: "Profile name"; selectByMouse: true; implicitWidth: 300 }
-    }
-    Dialog {
+    StudioDialog {
         id: deleteSceneDialog; modal: true; title: "Delete scene?"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
         contentItem: Text { text: "This scene and its layout will be removed."; color: "#DCE6E7"; width: 280; wrapMode: Text.WordWrap }
         onAccepted: studioController.deleteScene(root.deleteSceneId)
     }
-    Dialog {
+    StudioDialog {
         id: removeSourceDialog; modal: true; title: "Remove source?"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
         contentItem: Text { text: "This removes the source from the current scene."; color: "#DCE6E7"; width: 280; wrapMode: Text.WordWrap }
         onAccepted: studioController.removeSceneItem(root.removeItemId)
+    }
+    StudioDialog {
+        id: sourcePickerDialog
+        title: "Add source"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        onOpened: { sourceNameField.text = ""; sourcePickerDialog.standardButton(Dialog.Ok).enabled = false }
+        onAccepted: studioController.addSource(root.selectedSourceType, sourceNameField.text)
+        contentItem: ColumnLayout {
+            implicitWidth: 390
+            spacing: 10
+            Text { text: "Choose a placeholder source. Capture and devices are not connected yet."; color: "#9BAEB2"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Repeater {
+                model: ["Display Capture", "Window Capture", "Game Capture", "Webcam", "Microphone", "Desktop Audio", "Image", "Text"]
+                delegate: StudioButton {
+                    required property string modelData
+                    Layout.fillWidth: true
+                    implicitHeight: 34
+                    checkable: true
+                    checked: root.selectedSourceType === modelData
+                    text: modelData
+                    onClicked: { root.selectedSourceType = modelData; sourcePickerDialog.standardButton(Dialog.Ok).enabled = sourceNameField.text.trim().length > 0 }
+                }
+            }
+            Text { text: "Coming later: Browser Source, Media Source"; color: "#72858A"; font.pixelSize: 11 }
+            StudioTextField { id: sourceNameField; Layout.fillWidth: true; placeholderText: root.selectedSourceType.length > 0 ? root.selectedSourceType + " name" : "Choose a source type first"; enabled: root.selectedSourceType.length > 0; selectByMouse: true; onTextChanged: sourcePickerDialog.standardButton(Dialog.Ok).enabled = root.selectedSourceType.length > 0 && text.trim().length > 0 }
+        }
     }
 }
