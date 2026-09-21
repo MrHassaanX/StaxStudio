@@ -6,114 +6,93 @@ import "components"
 Item {
     id: root
     anchors.fill: parent
-
-    property color canvasColor: "#101619"
-    property color panelColor: "#182126"
-    property color panelEdge: "#2A383E"
-    property color accent: "#B8E85A"
+    readonly property color accent: "#B7E65C"
     property string renameSceneId: ""
     property string renameSourceId: ""
+    property string deleteSceneId: ""
+    property string removeItemId: ""
 
-    Rectangle { anchors.fill: parent; color: root.canvasColor }
+    Rectangle { anchors.fill: parent; color: "#0F171A" }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 22
-        spacing: 16
+        anchors.margins: 16
+        spacing: 12
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 48
-            spacing: 12
-
+            Layout.preferredHeight: 50
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 2
-                Text { text: "Studio Workspace"; color: "#F4F7F8"; font.pixelSize: 24; font.weight: Font.DemiBold }
-                Text { text: "Build the program before you go live"; color: "#89979E"; font.pixelSize: 12 }
+                Text { text: "Studio"; color: "#F5F8F8"; font.pixelSize: 22; font.weight: Font.DemiBold }
+                Text { text: "Arrange your program, then connect media when you are ready."; color: "#829399"; font.pixelSize: 12 }
             }
-
-            Rectangle {
-                Layout.preferredWidth: 210
-                Layout.preferredHeight: 42
-                radius: 6
-                color: "#1D292E"
-                border.color: root.panelEdge
-                Row {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 8
-                    Rectangle { width: 8; height: 8; radius: 4; anchors.verticalCenter: parent.verticalCenter; color: root.accent }
-                    Text { anchors.verticalCenter: parent.verticalCenter; text: studioController.profileName; color: "#DDE6E8"; font.pixelSize: 13; elide: Text.ElideRight; width: 150 }
+            Button {
+                Layout.preferredWidth: 206
+                Layout.preferredHeight: 38
+                background: Rectangle { radius: 5; color: parent.hovered ? "#203137" : "#1B292E"; border.color: "#30434A" }
+                contentItem: Row { anchors.fill: parent; anchors.margins: 10; spacing: 8
+                    Rectangle { width: 7; height: 7; radius: 4; anchors.verticalCenter: parent.verticalCenter; color: root.accent }
+                    Text { anchors.verticalCenter: parent.verticalCenter; width: parent.width - 20; text: studioController.profileName; color: "#DCE7E8"; font.pixelSize: 12; elide: Text.ElideRight }
                 }
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: profileDialog.open() }
+                onClicked: profileDialog.open()
+                ToolTip.visible: hovered
+                ToolTip.text: "Rename studio profile"
             }
         }
 
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 16
+            spacing: 12
 
             ColumnLayout {
-                Layout.preferredWidth: 248
-                Layout.minimumWidth: 210
+                Layout.preferredWidth: 222
+                Layout.minimumWidth: 200
                 Layout.fillHeight: true
                 spacing: 12
-
-                Rectangle {
+                StudioPanel {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.minimumHeight: 220
-                    radius: 7
-                    color: root.panelColor
-                    border.color: root.panelEdge
-
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: 14
                         spacing: 10
-                        PanelHeader { title: "Scenes"; subtitle: "Your program layouts"; actionText: "+"; onActionClicked: { sceneNameField.text = ""; sceneDialog.open() } }
+                        StudioSectionHeader {
+                            title: "Scenes"; subtitle: "Program layouts"
+                            IconButton { iconName: "add"; tooltip: "Add scene"; onClicked: { sceneNameField.text = ""; sceneDialog.open() } }
+                        }
                         ListView {
                             id: scenesView
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
-                            spacing: 4
+                            spacing: 3
                             model: studioController.scenesModel
-                            delegate: Rectangle {
+                            delegate: SceneRow {
                                 required property string sceneId
                                 required property string name
                                 required property bool active
                                 width: scenesView.width
-                                height: 44
-                                radius: 5
-                                color: active ? "#31413B" : (sceneMouse.containsMouse ? "#213036" : "transparent")
-                                border.color: active ? "#627A57" : "transparent"
-                                Text { anchors.left: parent.left; anchors.leftMargin: 11; anchors.verticalCenter: parent.verticalCenter; width: 125; text: name; elide: Text.ElideRight; color: active ? "#F1F6EA" : "#C2CED1"; font.pixelSize: 13; font.weight: active ? Font.DemiBold : Font.Normal }
-                                Row { anchors.right: parent.right; anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter; spacing: 1
-                                    ToolButton { text: "^"; visible: sceneMouse.containsMouse; onClicked: studioController.moveScene(sceneId, -1); ToolTip.visible: hovered; ToolTip.text: "Move scene up" }
-                                    ToolButton { text: "v"; visible: sceneMouse.containsMouse; onClicked: studioController.moveScene(sceneId, 1); ToolTip.visible: hovered; ToolTip.text: "Move scene down" }
-                                    ToolButton { text: "x"; visible: sceneMouse.containsMouse; onClicked: studioController.deleteScene(sceneId); ToolTip.visible: hovered; ToolTip.text: "Delete scene" }
-                                }
-                                MouseArea { id: sceneMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton; onClicked: studioController.selectScene(sceneId); onDoubleClicked: { root.renameSceneId = sceneId; renameSceneField.text = name; renameSceneDialog.open() } }
+                                onSelected: studioController.selectScene(sceneId)
+                                onRenameRequested: { root.renameSceneId = sceneId; renameSceneField.text = name; renameSceneDialog.open() }
+                                onDeleteRequested: { root.deleteSceneId = sceneId; deleteSceneDialog.open() }
+                                onMoveRequested: direction => studioController.moveScene(sceneId, direction)
                             }
                         }
-                        Text { Layout.fillWidth: true; visible: scenesView.count < 2; text: "Add scenes for each part of your stream."; color: "#7F8D93"; font.pixelSize: 11; wrapMode: Text.WordWrap }
                     }
                 }
-
-                Rectangle {
+                StudioPanel {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 300
-                    radius: 7
-                    color: root.panelColor
-                    border.color: root.panelEdge
+                    Layout.preferredHeight: 282
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: 14
                         spacing: 10
-                        PanelHeader { title: "Sources"; subtitle: "Layers in " + studioController.activeSceneName; actionText: "+"; onActionClicked: addSourceMenu.open() }
+                        StudioSectionHeader {
+                            title: "Sources"; subtitle: "Layers in " + studioController.activeSceneName
+                            IconButton { iconName: "add"; tooltip: "Add source"; onClicked: addSourceMenu.open() }
+                        }
                         ListView {
                             id: sourcesView
                             Layout.fillWidth: true
@@ -121,7 +100,7 @@ Item {
                             clip: true
                             spacing: 4
                             model: studioController.sceneItemsModel
-                            delegate: Rectangle {
+                            delegate: SourceRow {
                                 required property string itemId
                                 required property string sourceId
                                 required property string name
@@ -130,25 +109,15 @@ Item {
                                 required property bool itemLocked
                                 required property bool selected
                                 width: sourcesView.width
-                                height: 47
-                                radius: 5
-                                color: selected ? "#27393A" : (sourceMouse.containsMouse ? "#203038" : "transparent")
-                                border.color: selected ? "#5E8A86" : "transparent"
-                                Column { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; width: 120; spacing: 2
-                                    Text { width: parent.width; text: name; elide: Text.ElideRight; color: itemVisible ? "#E2E9EA" : "#77868C"; font.pixelSize: 12; font.weight: Font.DemiBold }
-                                    Text { width: parent.width; text: type + " - placeholder"; elide: Text.ElideRight; color: "#7D8A90"; font.pixelSize: 10 }
-                                }
-                                Row { anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter; spacing: 0
-                                    ToolButton { text: itemVisible ? "O" : "-"; onClicked: studioController.setItemVisible(itemId, !itemVisible); ToolTip.visible: hovered; ToolTip.text: itemVisible ? "Hide source" : "Show source" }
-                                    ToolButton { text: itemLocked ? "L" : "U"; onClicked: studioController.setItemLocked(itemId, !itemLocked); ToolTip.visible: hovered; ToolTip.text: itemLocked ? "Unlock source" : "Lock source" }
-                                    ToolButton { text: "^"; visible: sourceMouse.containsMouse; onClicked: studioController.moveSceneItem(itemId, 1); ToolTip.visible: hovered; ToolTip.text: "Move layer forward" }
-                                    ToolButton { text: "v"; visible: sourceMouse.containsMouse; onClicked: studioController.moveSceneItem(itemId, -1); ToolTip.visible: hovered; ToolTip.text: "Move layer backward" }
-                                    ToolButton { text: "x"; visible: sourceMouse.containsMouse; onClicked: studioController.removeSceneItem(itemId); ToolTip.visible: hovered; ToolTip.text: "Remove source from this scene" }
-                                }
-                                MouseArea { id: sourceMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton; onClicked: studioController.selectItem(itemId); onDoubleClicked: { root.renameSourceId = sourceId; renameSourceField.text = name; renameSourceDialog.open() } }
+                                onSelectedRequested: studioController.selectItem(itemId)
+                                onRenameRequested: { root.renameSourceId = sourceId; renameSourceField.text = name; renameSourceDialog.open() }
+                                onVisibleRequested: value => studioController.setItemVisible(itemId, value)
+                                onLockedRequested: value => studioController.setItemLocked(itemId, value)
+                                onMoveRequested: direction => studioController.moveSceneItem(itemId, direction)
+                                onRemoveRequested: { root.removeItemId = itemId; removeSourceDialog.open() }
                             }
                         }
-                        Text { visible: sourcesView.count === 0; Layout.fillWidth: true; text: "Add a placeholder source to shape this scene."; color: "#7F8D93"; font.pixelSize: 11; wrapMode: Text.WordWrap }
+                        Text { Layout.fillWidth: true; visible: sourcesView.count === 0; text: "Add a source to start composing this scene."; color: "#829399"; font.pixelSize: 11; wrapMode: Text.WordWrap }
                     }
                 }
             }
@@ -156,149 +125,155 @@ Item {
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumWidth: 480
+                Layout.minimumWidth: 470
                 spacing: 12
-
-                Rectangle {
+                StudioPanel {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    radius: 7
-                    color: "#121A1D"
-                    border.color: "#334148"
+                    contentMargin: 14
+                    color: "#131E22"
+                    border.color: "#30434A"
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: 14
                         spacing: 10
-                        RowLayout { Layout.fillWidth: true
-                            Text { Layout.fillWidth: true; text: studioController.activeSceneName; color: "#EAF0F1"; font.pixelSize: 14; font.weight: Font.DemiBold }
-                            Text { text: "PROGRAM PREVIEW"; color: "#8A9A9F"; font.pixelSize: 10; font.weight: Font.DemiBold }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { Layout.fillWidth: true; text: studioController.activeSceneName; color: "#F3F7F7"; font.pixelSize: 14; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                            Text { text: "PROGRAM PREVIEW"; color: "#8FA4A8"; font.pixelSize: 10; font.weight: Font.DemiBold }
                         }
                         Item {
                             id: previewFrame
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
-                            implicitWidth: 720
-                            implicitHeight: 405
+                            Layout.minimumHeight: 260
+                            clip: true
                             Rectangle {
                                 id: previewCanvas
                                 anchors.centerIn: parent
                                 width: Math.min(parent.width, parent.height * 16 / 9)
-                                height: width * 9 / 16
-                                color: "#0B1012"
-                                border.color: "#425158"
+                                height: Math.round(width * 9 / 16)
+                                color: "#0A0F11"
+                                border.color: "#48616A"
                                 border.width: 1
-                                Rectangle { anchors.fill: parent; anchors.margins: 1; color: "#142025" }
-                                Repeater {
-                                    model: studioController.sceneItemsModel
-                                    delegate: Rectangle {
-                                        required property string itemId
-                                        required property string name
-                                        required property string type
-                                        required property bool itemVisible
-                                        required property bool itemLocked
-                                        required property bool selected
-                                        x: previewCanvas.width * (0.08 + (index % 3) * 0.12)
-                                        y: previewCanvas.height * (0.12 + (index % 3) * 0.10)
-                                        width: previewCanvas.width * (index === 0 ? 0.72 : 0.32)
-                                        height: previewCanvas.height * (index === 0 ? 0.65 : 0.24)
-                                        visible: itemVisible
-                                        radius: 3
-                                        color: type === "Image" ? "#8C4F60" : (type === "Text" ? "#60518D" : "#315E65")
-                                        border.color: selected ? root.accent : (itemLocked ? "#A3ABB0" : "#7A8A90")
-                                        border.width: selected ? 2 : 1
-                                        opacity: 0.88
-                                        Text { anchors.centerIn: parent; width: parent.width - 12; horizontalAlignment: Text.AlignHCenter; text: name + "\n" + type; color: "#F2F6F6"; font.pixelSize: 12; font.weight: Font.DemiBold; wrapMode: Text.WordWrap }
-                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: studioController.selectItem(itemId) }
+                                clip: true
+                                Item {
+                                    id: programLayer
+                                    anchors.fill: parent
+                                    anchors.margins: 1
+                                    clip: true
+                                    Rectangle { anchors.fill: parent; color: "#152329" }
+                                    Repeater {
+                                        model: studioController.sceneItemsModel
+                                        delegate: Rectangle {
+                                            required property string itemId
+                                            required property string name
+                                            required property string type
+                                            required property bool itemVisible
+                                            required property bool itemLocked
+                                            required property bool selected
+                                            required property bool visual
+                                            required property real programX
+                                            required property real programY
+                                            required property real programWidth
+                                            required property real programHeight
+                                            x: Math.max(0, programX / 1920 * programLayer.width)
+                                            y: Math.max(0, programY / 1080 * programLayer.height)
+                                            width: Math.min(programLayer.width - x, Math.max(0, programWidth / 1920 * programLayer.width))
+                                            height: Math.min(programLayer.height - y, Math.max(0, programHeight / 1080 * programLayer.height))
+                                            z: zOrder + 1
+                                            visible: itemVisible && visual && width > 0 && height > 0
+                                            radius: 2
+                                            color: type === "Image" ? "#704251" : (type === "Text" ? "#4A4670" : "#284F58")
+                                            border.color: selected ? root.accent : (itemLocked ? "#AAB5B7" : "#66858C")
+                                            border.width: selected ? 2 : 1
+                                            opacity: 0.92
+                                            Text { anchors.centerIn: parent; width: Math.max(0, parent.width - 20); text: name; color: "#F2F7F7"; font.pixelSize: 13; font.weight: Font.DemiBold; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight }
+                                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: studioController.selectItem(itemId) }
+                                        }
+                                    }
+                                    Column {
+                                        anchors.centerIn: parent
+                                        visible: sourcesView.count === 0
+                                        spacing: 7
+                                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Start with a source"; color: "#E1EAEB"; font.pixelSize: 18; font.weight: Font.DemiBold }
+                                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "The preview will show your future program composition."; color: "#91A2A6"; font.pixelSize: 12 }
                                     }
                                 }
-                                Column { anchors.centerIn: parent; visible: sourcesView.count === 0; spacing: 8
-                                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Your scene starts here"; color: "#DFE7E7"; font.pixelSize: 18; font.weight: Font.DemiBold }
-                                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Add sources to compose a future program feed."; color: "#8D9A9F"; font.pixelSize: 12 }
-                                }
-                                Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.bottom: parent.bottom; anchors.bottomMargin: 8; text: "1920 x 1080  |  Placeholder composition"; color: "#8A979B"; font.pixelSize: 10 }
+                                Text { anchors.left: parent.left; anchors.leftMargin: 9; anchors.bottom: parent.bottom; anchors.bottomMargin: 7; text: "1920 x 1080"; color: "#8BA0A5"; font.pixelSize: 10; z: 10 }
                             }
                         }
                     }
                 }
-
-                Rectangle {
+                StudioPanel {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 54
-                    radius: 7
-                    color: root.panelColor
-                    border.color: root.panelEdge
-                    RowLayout { anchors.fill: parent; anchors.margins: 12; spacing: 10
+                    Layout.preferredHeight: 46
+                    RowLayout { anchors.fill: parent; spacing: 8
                         Rectangle { width: 8; height: 8; radius: 4; color: root.accent }
-                        Text { Layout.fillWidth: true; text: studioController.statusMessage; color: "#AAB8BA"; font.pixelSize: 11; elide: Text.ElideRight }
-                        Text { text: "Saved"; color: root.accent; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        Text { Layout.fillWidth: true; text: studioController.statusMessage; color: "#AEBEC1"; font.pixelSize: 11; elide: Text.ElideRight }
+                        Text { text: "Saved locally"; color: root.accent; font.pixelSize: 11; font.weight: Font.DemiBold }
                     }
                 }
             }
 
             ColumnLayout {
-                Layout.preferredWidth: 288
-                Layout.minimumWidth: 248
+                Layout.preferredWidth: 264
+                Layout.minimumWidth: 240
                 Layout.fillHeight: true
                 spacing: 12
-
-                Rectangle {
+                StudioPanel {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: 250
-                    radius: 7
-                    color: root.panelColor
-                    border.color: root.panelEdge
-                    ColumnLayout { anchors.fill: parent; anchors.margins: 14; spacing: 11
-                        PanelHeader { title: "Audio Mixer"; subtitle: "Inputs are inactive until audio setup" }
-                        ListView { id: mixerView; Layout.fillWidth: true; Layout.fillHeight: true; spacing: 10; clip: true; model: studioController.mixerModel
-                            delegate: ColumnLayout {
+                    Layout.minimumHeight: 216
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 10
+                        StudioSectionHeader { title: "Audio Mixer"; subtitle: "Inputs are inactive" }
+                        ListView {
+                            id: mixerView
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 12
+                            model: studioController.mixerModel
+                            delegate: MixerChannel {
                                 required property string channelId
                                 required property string name
-                                required property double volume
+                                required property real volume
                                 required property bool muted
-                                width: mixerView.width; spacing: 5
-                                RowLayout { Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: name; color: muted ? "#7B898D" : "#D9E2E3"; font.pixelSize: 12; font.weight: Font.DemiBold }
-                                    ToolButton { text: muted ? "OFF" : "ON"; onClicked: studioController.setMixerMuted(channelId, !muted); ToolTip.visible: hovered; ToolTip.text: muted ? "Unmute channel" : "Mute channel" }
-                                }
-                                RowLayout { Layout.fillWidth: true; spacing: 7
-                                    Rectangle { Layout.preferredWidth: 34; Layout.preferredHeight: 5; radius: 2; color: "#354349"; Rectangle { width: parent.width * 0.35; height: parent.height; radius: 2; color: muted ? "#59666B" : "#7A9581" } }
-                                    Slider { Layout.fillWidth: true; from: 0; to: 1; value: volume; onMoved: studioController.setMixerVolume(channelId, value) }
-                                    Text { text: Math.round(volume * 100) + "%"; color: "#849297"; font.pixelSize: 10; width: 30 }
-                                }
+                                width: mixerView.width
+                                onVolumeChangedByUser: value => studioController.setMixerVolume(channelId, value)
+                                onMuteRequested: value => studioController.setMixerMuted(channelId, value)
                             }
                         }
                     }
                 }
-
-                Rectangle {
+                StudioPanel {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 142
-                    radius: 7
-                    color: root.panelColor
-                    border.color: root.panelEdge
-                    ColumnLayout { anchors.fill: parent; anchors.margins: 14; spacing: 8
-                        PanelHeader { title: "Transition"; subtitle: "Applied when scenes change" }
-                        RowLayout { Layout.fillWidth: true
-                            ComboBox { Layout.fillWidth: true; model: ["Cut", "Fade"]; currentIndex: studioController.transitionType === "Cut" ? 0 : 1; onActivated: studioController.setTransitionType(currentText) }
-                            Text { text: studioController.transitionType === "Cut" ? "Instant" : studioController.transitionDurationMs + " ms"; color: "#AAB6B8"; font.pixelSize: 11 }
+                    Layout.preferredHeight: 150
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+                        StudioSectionHeader { title: "Transition"; subtitle: "Between scenes" }
+                        ComboBox { Layout.fillWidth: true; Layout.preferredHeight: 34; model: ["Cut", "Fade"]; currentIndex: studioController.transitionType === "Cut" ? 0 : 1; onActivated: studioController.setTransitionType(currentText) }
+                        RowLayout { Layout.fillWidth: true; visible: studioController.transitionType === "Fade"
+                            Text { text: "Duration"; color: "#AAB9BC"; font.pixelSize: 11 }
+                            Item { Layout.fillWidth: true }
+                            Text { text: studioController.transitionDurationMs + " ms"; color: "#D5E0E1"; font.pixelSize: 11 }
                         }
-                        Slider { Layout.fillWidth: true; enabled: studioController.transitionType === "Fade"; from: 0; to: 2000; stepSize: 50; value: studioController.transitionDurationMs; onMoved: studioController.setTransitionDurationMs(value) }
+                        Slider { Layout.fillWidth: true; visible: studioController.transitionType === "Fade"; from: 0; to: 2000; stepSize: 50; value: studioController.transitionDurationMs; onMoved: studioController.setTransitionDurationMs(value) }
                     }
                 }
-
-                Rectangle {
+                StudioPanel {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 190
-                    radius: 7
-                    color: "#1A282B"
-                    border.color: "#395055"
-                    ColumnLayout { anchors.fill: parent; anchors.margins: 14; spacing: 8
-                        PanelHeader { title: "Controls"; subtitle: "Output is not connected yet" }
-                        Button { Layout.fillWidth: true; text: "Start streaming"; enabled: false }
-                        Button { Layout.fillWidth: true; text: "Start recording"; enabled: false }
-                        Button { Layout.fillWidth: true; text: "Record + stream"; enabled: false }
+                    Layout.preferredHeight: 180
+                    color: "#172529"
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+                        StudioSectionHeader { title: "Controls"; subtitle: "Output is not connected" }
+                        StudioButton { Layout.fillWidth: true; text: "Start streaming"; enabled: false }
+                        StudioButton { Layout.fillWidth: true; text: "Start recording"; enabled: false }
+                        StudioButton { Layout.fillWidth: true; text: "Record + stream"; enabled: false }
                     }
                 }
             }
@@ -309,33 +284,38 @@ Item {
         id: addSourceMenu
         title: "Add placeholder source"
         Repeater { model: ["Display Capture", "Window Capture", "Game Capture", "Webcam", "Image", "Text", "Microphone", "Desktop Audio", "Browser Source", "Media Source"]
-            delegate: MenuItem { required property string modelData; text: modelData + (modelData === "Image" || modelData === "Text" ? "" : " (placeholder)"); onTriggered: studioController.addSource(modelData) }
+            delegate: MenuItem { required property string modelData; text: modelData; onTriggered: studioController.addSource(modelData) }
         }
     }
-
     Dialog {
-        id: sceneDialog; modal: true; title: "Create scene"; standardButtons: Dialog.Ok | Dialog.Cancel
-        anchors.centerIn: parent
+        id: sceneDialog; modal: true; title: "Create scene"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
         onAccepted: studioController.addScene(sceneNameField.text)
         contentItem: TextField { id: sceneNameField; placeholderText: "Scene name"; selectByMouse: true; implicitWidth: 300 }
     }
     Dialog {
-        id: renameSceneDialog; modal: true; title: "Rename scene"; standardButtons: Dialog.Ok | Dialog.Cancel
-        anchors.centerIn: parent
+        id: renameSceneDialog; modal: true; title: "Rename scene"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
         onAccepted: studioController.renameScene(root.renameSceneId, renameSceneField.text)
         contentItem: TextField { id: renameSceneField; placeholderText: "Scene name"; selectByMouse: true; implicitWidth: 300 }
     }
     Dialog {
-        id: renameSourceDialog; modal: true; title: "Rename source"; standardButtons: Dialog.Ok | Dialog.Cancel
-        anchors.centerIn: parent
+        id: renameSourceDialog; modal: true; title: "Rename source"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
         onAccepted: studioController.renameSource(root.renameSourceId, renameSourceField.text)
         contentItem: TextField { id: renameSourceField; placeholderText: "Source name"; selectByMouse: true; implicitWidth: 300 }
     }
     Dialog {
-        id: profileDialog; modal: true; title: "Rename profile"; standardButtons: Dialog.Ok | Dialog.Cancel
-        anchors.centerIn: parent
+        id: profileDialog; modal: true; title: "Rename profile"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
         onOpened: profileNameField.text = studioController.profileName
         onAccepted: studioController.setProfileName(profileNameField.text)
         contentItem: TextField { id: profileNameField; placeholderText: "Profile name"; selectByMouse: true; implicitWidth: 300 }
+    }
+    Dialog {
+        id: deleteSceneDialog; modal: true; title: "Delete scene?"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
+        contentItem: Text { text: "This scene and its layout will be removed."; color: "#DCE6E7"; width: 280; wrapMode: Text.WordWrap }
+        onAccepted: studioController.deleteScene(root.deleteSceneId)
+    }
+    Dialog {
+        id: removeSourceDialog; modal: true; title: "Remove source?"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
+        contentItem: Text { text: "This removes the source from the current scene."; color: "#DCE6E7"; width: 280; wrapMode: Text.WordWrap }
+        onAccepted: studioController.removeSceneItem(root.removeItemId)
     }
 }

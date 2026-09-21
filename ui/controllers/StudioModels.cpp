@@ -37,9 +37,14 @@ QVariant SceneItemListModel::data(const QModelIndex &index, int role) const
     if (role == ItemLockedRole) return item->locked;
     if (role == ZOrderRole) return item->zOrder;
     if (role == SelectedRole) return item->id == *selectedItemId_;
+    if (role == VisualRole) return source && source->type != SourceType::Microphone && source->type != SourceType::DesktopAudio;
+    if (role == XRole) return item->transform.x;
+    if (role == YRole) return item->transform.y;
+    if (role == WidthRole) return item->transform.width;
+    if (role == HeightRole) return item->transform.height;
     return {};
 }
-QHash<int, QByteArray> SceneItemListModel::roleNames() const { return {{IdRole, "itemId"}, {SourceIdRole, "sourceId"}, {NameRole, "name"}, {TypeRole, "type"}, {ItemVisibleRole, "itemVisible"}, {ItemLockedRole, "itemLocked"}, {ZOrderRole, "zOrder"}, {SelectedRole, "selected"}}; }
+QHash<int, QByteArray> SceneItemListModel::roleNames() const { return {{IdRole, "itemId"}, {SourceIdRole, "sourceId"}, {NameRole, "name"}, {TypeRole, "type"}, {ItemVisibleRole, "itemVisible"}, {ItemLockedRole, "itemLocked"}, {ZOrderRole, "zOrder"}, {SelectedRole, "selected"}, {VisualRole, "visual"}, {XRole, "programX"}, {YRole, "programY"}, {WidthRole, "programWidth"}, {HeightRole, "programHeight"}}; }
 void SceneItemListModel::refresh() { beginResetModel(); endResetModel(); }
 
 MixerListModel::MixerListModel(StudioProject *project, QObject *parent) : QAbstractListModel(parent), project_(project) {}

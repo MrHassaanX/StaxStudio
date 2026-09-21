@@ -51,8 +51,16 @@ qt_add_qml_module(StaxStudio
         ui/qml/Settings.qml
         ui/qml/Studio.qml
         ui/qml/components/ActionTile.qml
+        ui/qml/components/IconButton.qml
+        ui/qml/components/MixerChannel.qml
         ui/qml/components/PanelHeader.qml
         ui/qml/components/NavigationRail.qml
+        ui/qml/components/SceneRow.qml
+        ui/qml/components/SourceRow.qml
+        ui/qml/components/StudioButton.qml
+        ui/qml/components/StudioIcon.qml
+        ui/qml/components/StudioPanel.qml
+        ui/qml/components/StudioSectionHeader.qml
 )
 
 target_include_directories(StaxStudio

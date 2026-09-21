@@ -22,7 +22,7 @@ class SceneItemListModel final : public QAbstractListModel
 {
     Q_OBJECT
 public:
-    enum Role { IdRole = Qt::UserRole + 1, SourceIdRole, NameRole, TypeRole, ItemVisibleRole, ItemLockedRole, ZOrderRole, SelectedRole };
+    enum Role { IdRole = Qt::UserRole + 1, SourceIdRole, NameRole, TypeRole, ItemVisibleRole, ItemLockedRole, ZOrderRole, SelectedRole, VisualRole, XRole, YRole, WidthRole, HeightRole };
     explicit SceneItemListModel(StudioProject *project, QString *selectedItemId, QObject *parent = nullptr);
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;

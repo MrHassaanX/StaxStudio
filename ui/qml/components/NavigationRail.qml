@@ -14,7 +14,7 @@ Item {
                 top: parent.top
                 left: parent.left
                 right: parent.right
-                margins: 24
+                margins: 18
             }
             spacing: 0
 
@@ -66,7 +66,7 @@ Item {
                 }
             }
 
-            Item { width: 1; height: 32 }
+            Item { width: 1; height: 28 }
 
             Repeater {
                 model: [
@@ -86,14 +86,14 @@ Item {
                     property bool hovering: false
 
                     width: parent.width
-                    height: 48
+                    height: 44
                     radius: 6
                     color: selected ? "#25434A" : (hovering ? "#1C3037" : "transparent")
 
                     Text {
                         anchors {
                             left: parent.left
-                            leftMargin: 14
+                        leftMargin: 12
                             verticalCenter: parent.verticalCenter
                         }
                         text: navigationItem.modelData.number
@@ -105,12 +105,12 @@ Item {
                     Text {
                         anchors {
                             left: parent.left
-                            leftMargin: 49
+                        leftMargin: 43
                             verticalCenter: parent.verticalCenter
                         }
                         text: navigationItem.modelData.label
                         color: navigationItem.selected ? "#FFFFFF" : "#C7D4D6"
-                        font.pixelSize: 15
+                        font.pixelSize: 14
                         font.weight: navigationItem.selected ? Font.DemiBold : Font.Normal
                     }
 
@@ -131,9 +131,9 @@ Item {
                 left: parent.left
                 right: parent.right
                 bottom: parent.bottom
-                margins: 24
+                margins: 18
             }
-            height: 84
+            height: 72
             radius: 8
             color: "#1B3036"
             border.color: "#294850"
@@ -141,7 +141,7 @@ Item {
             Column {
                 anchors {
                     fill: parent
-                    margins: 15
+                margins: 12
                 }
                 spacing: 5
 
@@ -153,7 +153,7 @@ Item {
                 }
 
                 Text {
-                    text: "Not configured"
+                    text: "Recommendations arrive with hardware setup"
                     color: "#8FA6A9"
                     font.pixelSize: 12
                 }

@@ -8,8 +8,8 @@ ApplicationWindow {
 
     width: 1440
     height: 900
-    minimumWidth: 1120
-    minimumHeight: 720
+    minimumWidth: 1280
+    minimumHeight: 760
     visible: true
     title: "StaxStudio"
     color: "#F5F7F8"
@@ -39,7 +39,7 @@ ApplicationWindow {
 
         NavigationRail {
             Layout.fillHeight: true
-            Layout.preferredWidth: 236
+            Layout.preferredWidth: 210
         }
 
         Rectangle {
