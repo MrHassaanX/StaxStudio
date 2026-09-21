@@ -126,7 +126,23 @@ bool StudioProject::removeSceneItem(const QString &sceneItemId)
     Scene *scene = activeScene();
     if (!scene) return false;
     for (qsizetype i = 0; i < scene->items.size(); ++i) {
-        if (scene->items[i].id == sceneItemId) { scene->items.removeAt(i); normalize(); return true; }
+        if (scene->items[i].id == sceneItemId) {
+            const QString sourceId = scene->items[i].sourceId;
+            scene->items.removeAt(i);
+            bool sourceIsStillUsed = false;
+            for (const Scene &candidate : scenes) {
+                for (const SceneItem &item : candidate.items) {
+                    if (item.sourceId == sourceId) { sourceIsStillUsed = true; break; }
+                }
+                if (sourceIsStillUsed) break;
+            }
+            if (!sourceIsStillUsed) {
+                const int sourceToRemove = sourceIndex(sourceId);
+                if (sourceToRemove >= 0) sources.removeAt(sourceToRemove);
+            }
+            normalize();
+            return true;
+        }
     }
     return false;
 }

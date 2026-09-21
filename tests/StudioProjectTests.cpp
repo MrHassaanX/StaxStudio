@@ -70,6 +70,7 @@ void StudioProjectTests::managesSourceLayerState()
     QVERIFY(item.locked);
     QVERIFY(project.removeSceneItem(item.id));
     QVERIFY(project.activeScene()->items.isEmpty());
+    QVERIFY(project.sources.isEmpty());
 }
 
 void StudioProjectTests::persistsAndRestoresProject()
