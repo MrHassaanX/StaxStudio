@@ -6,6 +6,7 @@
 #include <QString>
 
 #include "ui/controllers/AppController.h"
+#include "ui/controllers/StudioController.h"
 
 int main(int argc, char *argv[])
 {
@@ -18,9 +19,11 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     AppController appController;
+    StudioController studioController;
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("appController"), &appController);
+    engine.rootContext()->setContextProperty(QStringLiteral("studioController"), &studioController);
 
     QObject::connect(
         &engine,

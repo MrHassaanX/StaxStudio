@@ -6,10 +6,10 @@ import "components"
 ApplicationWindow {
     id: root
 
-    width: 1280
-    height: 800
-    minimumWidth: 1024
-    minimumHeight: 680
+    width: 1440
+    height: 900
+    minimumWidth: 1120
+    minimumHeight: 720
     visible: true
     title: "StaxStudio"
     color: "#F5F7F8"
@@ -17,6 +17,9 @@ ApplicationWindow {
     function pageComponent(pageName) {
         if (pageName === "record") {
             return recordPage
+        }
+        if (pageName === "studio") {
+            return studioPage
         }
         if (pageName === "stream") {
             return streamPage
@@ -59,6 +62,11 @@ ApplicationWindow {
     Component {
         id: recordPage
         Record { }
+    }
+
+    Component {
+        id: studioPage
+        Studio { }
     }
 
     Component {

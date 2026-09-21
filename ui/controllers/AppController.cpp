@@ -22,18 +22,18 @@ void AppController::setActivePage(const QString &pageName)
 
 void AppController::startRecording()
 {
-    setActivePage(QStringLiteral("record"));
+    setActivePage(QStringLiteral("studio"));
     emit actionRequested(QStringLiteral("record"));
 }
 
 void AppController::startStreaming()
 {
-    setActivePage(QStringLiteral("stream"));
+    setActivePage(QStringLiteral("studio"));
     emit actionRequested(QStringLiteral("stream"));
 }
 
 void AppController::startRecordAndStream()
 {
-    setActivePage(QStringLiteral("stream"));
+    setActivePage(QStringLiteral("studio"));
     emit actionRequested(QStringLiteral("record-and-stream"));
 }
