@@ -83,6 +83,16 @@ target_link_libraries(StaxStudio
         Qt6::QuickControls2
 )
 
+if(WIN32)
+    add_custom_command(TARGET StaxStudio POST_BUILD
+        COMMAND "$<TARGET_FILE:Qt6::windeployqt>"
+            --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/ui/qml"
+            "$<TARGET_FILE:StaxStudio>"
+        COMMENT "Deploying Qt runtime dependencies for StaxStudio"
+        VERBATIM
+    )
+endif()
+
 set_target_properties(StaxStudio PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
@@ -112,4 +122,14 @@ qt_add_executable(StaxStudioTests
 
 target_include_directories(StaxStudioTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Test)
+
+if(WIN32)
+    add_custom_command(TARGET StaxStudioTests POST_BUILD
+        COMMAND "$<TARGET_FILE:Qt6::windeployqt>"
+            "$<TARGET_FILE:StaxStudioTests>"
+        COMMENT "Deploying Qt runtime dependencies for StaxStudio tests"
+        VERBATIM
+    )
+endif()
+
 add_test(NAME StaxStudioTests COMMAND StaxStudioTests)
