@@ -10,6 +10,11 @@ QString AppController::activePage() const
     return activePage_;
 }
 
+bool AppController::gpuPreviewEnabled() const
+{
+    return gpuPreviewEnabled_;
+}
+
 void AppController::setActivePage(const QString &pageName)
 {
     if (pageName.isEmpty() || activePage_ == pageName) {
@@ -18,6 +23,16 @@ void AppController::setActivePage(const QString &pageName)
 
     activePage_ = pageName;
     emit activePageChanged();
+}
+
+void AppController::setGpuPreviewEnabled(const bool enabled)
+{
+    if (gpuPreviewEnabled_ == enabled) {
+        return;
+    }
+
+    gpuPreviewEnabled_ = enabled;
+    emit gpuPreviewEnabledChanged();
 }
 
 void AppController::startRecording()

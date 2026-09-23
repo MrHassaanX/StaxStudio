@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/audio/mixer/MixerChannel.h"
+#include "core/render/ProgramResolution.h"
 #include "core/scene/Scene.h"
 #include "core/source/Source.h"
 #include "core/transition/TransitionSettings.h"
@@ -21,6 +22,7 @@ public:
     QVector<Scene> scenes;
     QVector<Source> sources;
     QVector<MixerChannel> mixerChannels;
+    ProgramResolution programResolution = ProgramResolution::hd1080();
     TransitionSettings transition;
 
     [[nodiscard]] const Scene *activeScene() const;

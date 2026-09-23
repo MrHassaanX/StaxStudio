@@ -1,5 +1,6 @@
 #include "ui/controllers/AppController.h"
 #include "ui/controllers/StudioController.h"
+#include "ui/render/ProgramPreview.h"
 
 #include <QAbstractItemModelTester>
 #include <QGuiApplication>
@@ -41,6 +42,7 @@ void StudioUiTests::visibleRowsAndRepeatedLifecycle()
     QVERIFY(directory.isValid());
     AppController navigation;
     StudioController controller(directory.path());
+    navigation.setGpuPreviewEnabled(false);
     QAbstractItemModelTester sceneContract(controller.scenesModel(), QAbstractItemModelTester::FailureReportingMode::QtTest);
     QAbstractItemModelTester sourceContract(controller.sceneItemsModel(), QAbstractItemModelTester::FailureReportingMode::QtTest);
     QAbstractItemModelTester mixerContract(controller.mixerModel(), QAbstractItemModelTester::FailureReportingMode::QtTest);
@@ -173,6 +175,7 @@ int main(int argc, char **argv)
 {
     QGuiApplication app(argc, argv);
     QQuickStyle::setStyle("Basic");
+    qmlRegisterType<ProgramPreview>("StaxStudio.Render", 1, 0, "ProgramPreview");
     StudioUiTests tests;
     return QTest::qExec(&tests, argc, argv);
 }

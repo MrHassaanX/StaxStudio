@@ -7,6 +7,7 @@ QString sourceTypeName(SourceType type)
     case SourceType::WindowCapture: return QStringLiteral("Window Capture");
     case SourceType::GameCapture: return QStringLiteral("Game Capture");
     case SourceType::Webcam: return QStringLiteral("Webcam");
+    case SourceType::Color: return QStringLiteral("Color Source");
     case SourceType::Image: return QStringLiteral("Image");
     case SourceType::Text: return QStringLiteral("Text");
     case SourceType::Microphone: return QStringLiteral("Microphone");
@@ -22,6 +23,7 @@ SourceType sourceTypeFromName(const QString &name, bool *ok)
     const QString normalized = name.trimmed();
     for (const auto type : {SourceType::DisplayCapture, SourceType::WindowCapture,
                             SourceType::GameCapture, SourceType::Webcam, SourceType::Image,
+                            SourceType::Color,
                             SourceType::Text, SourceType::Microphone, SourceType::DesktopAudio,
                             SourceType::Browser, SourceType::Media}) {
         if (sourceTypeName(type).compare(normalized, Qt::CaseInsensitive) == 0) {

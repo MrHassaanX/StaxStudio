@@ -8,6 +8,7 @@ enum class SourceType {
     WindowCapture,
     GameCapture,
     Webcam,
+    Color,
     Image,
     Text,
     Microphone,

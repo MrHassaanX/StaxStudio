@@ -3,14 +3,20 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <QString>
 
 #include "ui/controllers/AppController.h"
 #include "ui/controllers/StudioController.h"
+#include "ui/render/ProgramPreview.h"
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
+    qmlRegisterType<ProgramPreview>("StaxStudio.Render", 1, 0, "ProgramPreview");
 
     QGuiApplication::setApplicationName(QStringLiteral("StaxStudio"));
     QGuiApplication::setOrganizationName(QStringLiteral("StaxStudio"));

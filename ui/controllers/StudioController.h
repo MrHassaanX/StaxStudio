@@ -4,6 +4,7 @@
 #include "core/project/StudioRepository.h"
 
 #include <QObject>
+#include <QVariantList>
 #include <QVariantMap>
 
 class StudioController final : public QObject
@@ -18,6 +19,9 @@ class StudioController final : public QObject
     Q_PROPERTY(QString profileName READ profileName NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString transitionType READ transitionType NOTIFY projectChanged FINAL)
     Q_PROPERTY(int transitionDurationMs READ transitionDurationMs NOTIFY projectChanged FINAL)
+    Q_PROPERTY(int programWidth READ programWidth NOTIFY projectChanged FINAL)
+    Q_PROPERTY(int programHeight READ programHeight NOTIFY projectChanged FINAL)
+    Q_PROPERTY(QVariantList compositorLayers READ compositorLayers NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged FINAL)
 public:
     explicit StudioController(QObject *parent = nullptr);
@@ -31,6 +35,9 @@ public:
     QString profileName() const;
     QString transitionType() const;
     int transitionDurationMs() const;
+    int programWidth() const;
+    int programHeight() const;
+    QVariantList compositorLayers() const;
     QString statusMessage() const;
 
     Q_INVOKABLE void addScene(const QString &name);
@@ -48,6 +55,8 @@ public:
     Q_INVOKABLE void selectItem(const QString &itemId);
     Q_INVOKABLE QVariantMap itemTransform(const QString &itemId) const;
     Q_INVOKABLE void setItemTransform(const QString &itemId, const QVariantMap &values);
+    Q_INVOKABLE void previewItemTransform(const QString &itemId, const QVariantMap &values);
+    Q_INVOKABLE void commitPreviewTransform();
     Q_INVOKABLE void applyTransformAction(const QString &itemId, const QString &action);
     Q_INVOKABLE void removeSourceFromActiveScene(const QString &sourceId);
     Q_INVOKABLE void setMixerVolume(const QString &channelId, double volume);

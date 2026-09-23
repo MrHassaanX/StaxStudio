@@ -1,5 +1,7 @@
 #include "StudioController.h"
 
+#include "core/render/CompositorScene.h"
+
 namespace {
 QVariantMap transformValues(const Transform &value)
 {
@@ -31,6 +33,22 @@ QString StudioController::selectedItemId() const { return selectedItemId_; }
 QString StudioController::profileName() const { return project_.profileName; }
 QString StudioController::transitionType() const { return project_.transition.type == TransitionType::Cut ? QStringLiteral("Cut") : QStringLiteral("Fade"); }
 int StudioController::transitionDurationMs() const { return project_.transition.durationMs; }
+int StudioController::programWidth() const { return project_.programResolution.width; }
+int StudioController::programHeight() const { return project_.programResolution.height; }
+QVariantList StudioController::compositorLayers() const
+{
+    QVariantList values;
+    for (const CompositorLayer &layer : CompositorScene::activeLayers(project_)) {
+        values.append(QVariantMap{{"itemId", layer.sceneItemId}, {"x", layer.transform.x}, {"y", layer.transform.y},
+                                  {"width", layer.transform.width}, {"height", layer.transform.height},
+                                  {"scaleX", layer.transform.scaleX}, {"scaleY", layer.transform.scaleY},
+                                  {"rotation", layer.transform.rotation}, {"cropLeft", layer.transform.cropLeft},
+                                  {"cropTop", layer.transform.cropTop}, {"cropRight", layer.transform.cropRight},
+                                  {"cropBottom", layer.transform.cropBottom}, {"flipHorizontal", layer.transform.flipHorizontal},
+                                  {"flipVertical", layer.transform.flipVertical}, {"color", layer.frame.color}, {"zOrder", layer.zOrder}});
+    }
+    return values;
+}
 QString StudioController::statusMessage() const { return statusMessage_; }
 
 void StudioController::addScene(const QString &name)
@@ -125,6 +143,27 @@ void StudioController::setItemTransform(const QString &itemId, const QVariantMap
     value.flipVertical = values.value("flipVertical", existing.value("flipVertical")).toBool();
     if (sceneItemsModel_.setItemTransform(itemId, value)) refresh();
 }
+void StudioController::previewItemTransform(const QString &itemId, const QVariantMap &values)
+{
+    Transform value;
+    const QVariantMap existing = itemTransform(itemId);
+    if (existing.isEmpty()) return;
+    value.x = values.value("x", existing.value("x")).toDouble();
+    value.y = values.value("y", existing.value("y")).toDouble();
+    value.width = values.value("width", existing.value("width")).toDouble();
+    value.height = values.value("height", existing.value("height")).toDouble();
+    value.scaleX = values.value("scaleX", existing.value("scaleX")).toDouble();
+    value.scaleY = values.value("scaleY", existing.value("scaleY")).toDouble();
+    value.rotation = values.value("rotation", existing.value("rotation")).toDouble();
+    value.cropLeft = values.value("cropLeft", existing.value("cropLeft")).toDouble();
+    value.cropTop = values.value("cropTop", existing.value("cropTop")).toDouble();
+    value.cropRight = values.value("cropRight", existing.value("cropRight")).toDouble();
+    value.cropBottom = values.value("cropBottom", existing.value("cropBottom")).toDouble();
+    value.flipHorizontal = values.value("flipHorizontal", existing.value("flipHorizontal")).toBool();
+    value.flipVertical = values.value("flipVertical", existing.value("flipVertical")).toBool();
+    if (sceneItemsModel_.setItemTransform(itemId, value)) emit projectChanged();
+}
+void StudioController::commitPreviewTransform() { save(); emit projectChanged(); }
 void StudioController::applyTransformAction(const QString &itemId, const QString &action) { if (sceneItemsModel_.applyTransformAction(itemId, action)) refresh(); }
 void StudioController::removeSourceFromActiveScene(const QString &sourceId)
 {

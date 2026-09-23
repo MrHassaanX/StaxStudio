@@ -55,6 +55,8 @@ StudioProject StudioRepository::load() const
     project.profileId = root.value("profileId").toString();
     project.profileName = root.value("profileName").toString();
     project.activeSceneId = root.value("activeSceneId").toString();
+    project.programResolution = {root.value("programWidth").toInt(1920), root.value("programHeight").toInt(1080)};
+    if (!project.programResolution.isValid()) project.programResolution = ProgramResolution::hd1080();
     for (const QJsonValue &value : root.value("sources").toArray()) {
         const QJsonObject item = value.toObject(); bool typeOk = false;
         const SourceType type = sourceTypeFromName(item.value("type").toString(), &typeOk);
@@ -106,7 +108,7 @@ bool StudioRepository::save(const StudioProject &project, QString *errorMessage)
     for (const MixerChannel &channel : project.mixerChannels) {
         mixer.append(QJsonObject{{"id", channel.id}, {"name", channel.name}, {"volume", channel.volume}, {"muted", channel.muted}});
     }
-    const QJsonObject root{{"schemaVersion", StudioProject::SchemaVersion}, {"profileId", project.profileId}, {"profileName", project.profileName}, {"activeSceneId", project.activeSceneId}, {"sources", sources}, {"scenes", scenes}, {"mixerChannels", mixer}, {"transition", QJsonObject{{"type", project.transition.type == TransitionType::Cut ? "Cut" : "Fade"}, {"durationMs", project.transition.durationMs}}}};
+    const QJsonObject root{{"schemaVersion", StudioProject::SchemaVersion}, {"profileId", project.profileId}, {"profileName", project.profileName}, {"activeSceneId", project.activeSceneId}, {"programWidth", project.programResolution.width}, {"programHeight", project.programResolution.height}, {"sources", sources}, {"scenes", scenes}, {"mixerChannels", mixer}, {"transition", QJsonObject{{"type", project.transition.type == TransitionType::Cut ? "Cut" : "Fade"}, {"durationMs", project.transition.durationMs}}}};
     QSaveFile file(filePath());
     if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0 || !file.commit()) { if (errorMessage) *errorMessage = file.errorString(); return false; }
     return true;

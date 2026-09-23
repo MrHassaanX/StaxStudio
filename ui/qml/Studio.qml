@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "components"
+import StaxStudio.Render
 
 Item {
     id: root
@@ -187,18 +188,43 @@ Item {
                                 border.color: "#48616A"
                                 border.width: 1
                                 clip: true
+                                Loader {
+                                    id: programPreviewLoader
+                                    objectName: "programPreview"
+                                    anchors.fill: parent
+                                    anchors.margins: 1
+                                    active: appController.gpuPreviewEnabled
+                                    sourceComponent: programPreviewComponent
+                                }
+                                Component {
+                                    id: programPreviewComponent
+                                    ProgramPreview {
+                                        programWidth: studioController.programWidth
+                                        programHeight: studioController.programHeight
+                                        layers: studioController.compositorLayers
+                                    }
+                                }
+                                Text {
+                                    anchors.centerIn: parent
+                                    width: parent.width - 32
+                                    visible: programPreviewLoader.item
+                                        && programPreviewLoader.item.rendererState.indexOf("failed") >= 0
+                                    text: "GPU preview unavailable"
+                                    color: "#E7B17B"
+                                    font.pixelSize: 12
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.WordWrap
+                                }
                                 Item {
                                     id: programLayer
                                     anchors.fill: parent
-                                    anchors.margins: 1
                                     clip: true
                                     Repeater {
                                         model: studioController.sceneItemsModel
-                                        delegate: Rectangle {
-                                            id: previewItem
+                                        delegate: Item {
+                                            id: editorItem
                                             required property string itemId
                                             required property string name
-                                            required property string type
                                             required property bool itemVisible
                                             required property bool itemLocked
                                             required property bool selected
@@ -215,24 +241,58 @@ Item {
                                             required property real cropTop
                                             required property real cropRight
                                             required property real cropBottom
-                                            required property bool flipHorizontal
-                                            required property bool flipVertical
-                                            x: (programX + cropLeft * programScaleX) / 1920 * programLayer.width
-                                            y: (programY + cropTop * programScaleY) / 1080 * programLayer.height
-                                            width: Math.max(0, (programWidth - cropLeft - cropRight) * programScaleX / 1920 * programLayer.width)
-                                            height: Math.max(0, (programHeight - cropTop - cropBottom) * programScaleY / 1080 * programLayer.height)
+                                            x: (programX + cropLeft * programScaleX) / studioController.programWidth * programLayer.width
+                                            y: (programY + cropTop * programScaleY) / studioController.programHeight * programLayer.height
+                                            width: Math.max(0, (programWidth - cropLeft - cropRight) * programScaleX / studioController.programWidth * programLayer.width)
+                                            height: Math.max(0, (programHeight - cropTop - cropBottom) * programScaleY / studioController.programHeight * programLayer.height)
                                             z: zOrder + 1
                                             visible: itemVisible && visual && width > 0 && height > 0
                                             rotation: programRotation
                                             transformOrigin: Item.Center
-                                            transform: Scale { origin.x: previewItem.width / 2; origin.y: previewItem.height / 2; xScale: previewItem.flipHorizontal ? -1 : 1; yScale: previewItem.flipVertical ? -1 : 1 }
-                                            radius: 2
-                                            color: type === "Image" ? "#704251" : (type === "Text" ? "#4A4670" : "#284F58")
-                                            border.color: selected ? root.accent : (itemLocked ? "#AAB5B7" : "#66858C")
-                                            border.width: selected ? 2 : 1
-                                            opacity: 0.92
-                                            Text { anchors.centerIn: parent; width: Math.max(0, parent.width - 20); text: name; color: "#F2F7F7"; font.pixelSize: 13; font.weight: Font.DemiBold; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight }
-                                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: studioController.selectItem(itemId) }
+                                            Rectangle { anchors.fill: parent; color: "transparent"; border.color: root.accent; border.width: 2; visible: editorItem.selected }
+                                            Text { visible: editorItem.selected; anchors.left: parent.left; anchors.bottom: parent.top; text: editorItem.name; color: "#EAF4E6"; font.pixelSize: 10; font.weight: Font.DemiBold }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: editorItem.itemLocked ? Qt.ArrowCursor : Qt.SizeAllCursor
+                                                property point pressPoint
+                                                property var startTransform
+                                                onPressed: event => {
+                                                    studioController.selectItem(editorItem.itemId)
+                                                    if (editorItem.itemLocked) return
+                                                    pressPoint = Qt.point(event.x, event.y)
+                                                    startTransform = studioController.itemTransform(editorItem.itemId)
+                                                }
+                                                onPositionChanged: event => {
+                                                    if (editorItem.itemLocked || !pressed || !startTransform) return
+                                                    const next = studioController.itemTransform(editorItem.itemId)
+                                                    next.x = startTransform.x + (event.x - pressPoint.x) / programLayer.width * studioController.programWidth
+                                                    next.y = startTransform.y + (event.y - pressPoint.y) / programLayer.height * studioController.programHeight
+                                                    studioController.previewItemTransform(editorItem.itemId, next)
+                                                }
+                                                onReleased: if (!editorItem.itemLocked) studioController.commitPreviewTransform()
+                                            }
+                                            Rectangle {
+                                                visible: editorItem.selected && !editorItem.itemLocked
+                                                width: 10; height: 10; radius: 2; color: root.accent; border.color: "#122024"
+                                                anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: -5
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.SizeFDiagCursor
+                                                    property point pressPoint
+                                                    property var startTransform
+                                                    onPressed: event => { pressPoint = Qt.point(event.x, event.y); startTransform = studioController.itemTransform(editorItem.itemId) }
+                                                    onPositionChanged: event => {
+                                                        if (!pressed || !startTransform) return
+                                                        const next = studioController.itemTransform(editorItem.itemId)
+                                                        const widthDelta = (event.x - pressPoint.x) / programLayer.width * studioController.programWidth
+                                                        next.width = Math.max(1, startTransform.width + widthDelta / Math.max(0.01, startTransform.scaleX))
+                                                        next.height = Math.max(1, startTransform.height * next.width / Math.max(1, startTransform.width))
+                                                        studioController.previewItemTransform(editorItem.itemId, next)
+                                                    }
+                                                    onReleased: studioController.commitPreviewTransform()
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -369,7 +429,7 @@ Item {
             spacing: 10
             Text { text: "Choose a placeholder source. Capture and devices are not connected yet."; color: "#9BAEB2"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Repeater {
-                model: ["Display Capture", "Window Capture", "Game Capture", "Webcam", "Microphone", "Desktop Audio", "Image", "Text"]
+                model: ["Display Capture", "Window Capture", "Game Capture", "Webcam", "Color Source", "Microphone", "Desktop Audio", "Image", "Text"]
                 delegate: StudioButton {
                     required property string modelData
                     Layout.fillWidth: true

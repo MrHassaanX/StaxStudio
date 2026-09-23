@@ -143,6 +143,7 @@ Source &StudioProject::addSource(SourceType type)
 {
     const QString name = uniqueSourceName(sourceTypeName(type));
     sources.append({newId(), name, type, true, {}});
+    if (type == SourceType::Color) sources.last().configuration.insert(QStringLiteral("color"), QStringLiteral("#496E78"));
     Scene *scene = activeScene();
     if (scene) scene->items.append({newId(), sources.last().id, {}, true, false, static_cast<int>(scene->items.size())});
     if (type == SourceType::Microphone || type == SourceType::DesktopAudio)
@@ -226,7 +227,10 @@ bool StudioProject::setSceneItemTransform(const QString &sceneItemId, const Tran
 
 bool StudioProject::resetSceneItemTransform(const QString &sceneItemId)
 {
-    return setSceneItemTransform(sceneItemId, {});
+    Transform transform;
+    transform.width = programResolution.width;
+    transform.height = programResolution.height;
+    return setSceneItemTransform(sceneItemId, transform);
 }
 
 bool StudioProject::fitSceneItemToCanvas(const QString &sceneItemId)
@@ -236,13 +240,13 @@ bool StudioProject::fitSceneItemToCanvas(const QString &sceneItemId)
     Transform value = item->transform;
     const double sourceWidth = qMax(1.0, (value.width - value.cropLeft - value.cropRight) * value.scaleX);
     const double sourceHeight = qMax(1.0, (value.height - value.cropTop - value.cropBottom) * value.scaleY);
-    const double scale = qMin(1920.0 / sourceWidth, 1080.0 / sourceHeight);
+    const double scale = qMin(programResolution.width / sourceWidth, programResolution.height / sourceHeight);
     value.width = sourceWidth * scale;
     value.height = sourceHeight * scale;
     value.scaleX = 1.0;
     value.scaleY = 1.0;
-    value.x = (1920.0 - value.width) / 2.0;
-    value.y = (1080.0 - value.height) / 2.0;
+    value.x = (programResolution.width - value.width) / 2.0;
+    value.y = (programResolution.height - value.height) / 2.0;
     value.cropLeft = value.cropTop = value.cropRight = value.cropBottom = 0.0;
     return setSceneItemTransform(sceneItemId, value);
 }
@@ -250,6 +254,8 @@ bool StudioProject::fitSceneItemToCanvas(const QString &sceneItemId)
 bool StudioProject::stretchSceneItemToCanvas(const QString &sceneItemId)
 {
     Transform value;
+    value.width = programResolution.width;
+    value.height = programResolution.height;
     return setSceneItemTransform(sceneItemId, value);
 }
 
@@ -260,8 +266,8 @@ bool StudioProject::centerSceneItem(const QString &sceneItemId, bool horizontal,
     Transform value = item->transform;
     const double renderedWidth = (value.width - value.cropLeft - value.cropRight) * value.scaleX;
     const double renderedHeight = (value.height - value.cropTop - value.cropBottom) * value.scaleY;
-    if (horizontal) value.x = (1920.0 - renderedWidth) / 2.0;
-    if (vertical) value.y = (1080.0 - renderedHeight) / 2.0;
+    if (horizontal) value.x = (programResolution.width - renderedWidth) / 2.0;
+    if (vertical) value.y = (programResolution.height - renderedHeight) / 2.0;
     return setSceneItemTransform(sceneItemId, value);
 }
 

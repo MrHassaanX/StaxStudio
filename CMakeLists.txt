@@ -15,7 +15,8 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Test)
+# QQuickRhiItem exposes QRhi through QtGui's versioned private headers. Keep that dependency in ui/render.
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick QuickControls2 ShaderTools Test)
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
@@ -27,6 +28,13 @@ qt_add_executable(StaxStudio
     core/project/StudioProject.h
     core/project/StudioRepository.cpp
     core/project/StudioRepository.h
+    core/render/CompositorScene.cpp
+    core/render/CompositorScene.h
+    core/render/ProgramResolution.cpp
+    core/render/ProgramResolution.h
+    core/render/VisualSourceFrame.h
+    core/render/shaders/compositor.frag
+    core/render/shaders/compositor.vert
     core/scene/Scene.h
     core/source/Source.cpp
     core/source/Source.h
@@ -37,6 +45,15 @@ qt_add_executable(StaxStudio
     ui/controllers/StudioController.h
     ui/controllers/StudioModels.cpp
     ui/controllers/StudioModels.h
+    ui/render/ProgramPreview.cpp
+    ui/render/ProgramPreview.h
+)
+
+qt_add_shaders(StaxStudio "StaxCompositorShaders"
+    PREFIX "/stax/shaders"
+    FILES
+        core/render/shaders/compositor.vert
+        core/render/shaders/compositor.frag
 )
 
 qt_add_qml_module(StaxStudio
@@ -80,6 +97,7 @@ target_link_libraries(StaxStudio
     PRIVATE
         Qt6::Core
         Qt6::Gui
+        Qt6::GuiPrivate
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
@@ -115,6 +133,11 @@ qt_add_executable(StaxStudioTests
     core/project/StudioProject.h
     core/project/StudioRepository.cpp
     core/project/StudioRepository.h
+    core/render/CompositorScene.cpp
+    core/render/CompositorScene.h
+    core/render/ProgramResolution.cpp
+    core/render/ProgramResolution.h
+    core/render/VisualSourceFrame.h
     core/scene/Scene.h
     core/source/Source.cpp
     core/source/Source.h
@@ -125,7 +148,7 @@ qt_add_executable(StaxStudioTests
 )
 
 target_include_directories(StaxStudioTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Test)
+target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 
 if(WIN32)
     add_custom_command(TARGET StaxStudioTests POST_BUILD
@@ -142,14 +165,17 @@ qt_add_executable(StaxStudioUiTests
     tests/StudioUiTests.cpp
     core/project/StudioProject.cpp
     core/project/StudioRepository.cpp
+    core/render/CompositorScene.cpp
+    core/render/ProgramResolution.cpp
     core/source/Source.cpp
     ui/controllers/AppController.cpp
     ui/controllers/StudioController.cpp
     ui/controllers/StudioModels.cpp
+    ui/render/ProgramPreview.cpp
 )
 target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Test)
+target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Test)
 add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
 set_tests_properties(StaxStudioUiTests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"

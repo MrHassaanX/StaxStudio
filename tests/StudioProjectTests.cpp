@@ -1,5 +1,6 @@
 #include "core/project/StudioProject.h"
 #include "core/project/StudioRepository.h"
+#include "core/render/CompositorScene.h"
 #include "ui/controllers/StudioModels.h"
 
 #include <QFile>
@@ -15,6 +16,7 @@ private slots:
     void reordersScenesAndItems();
     void managesSourceLayerState();
     void appliesAndPersistsTransformOperations();
+    void composesVisibleLayersAtProgramResolution();
     void persistsAndRestoresProject();
     void recoversFromInvalidConfiguration();
     void recoversFromUnsupportedSchema();
@@ -113,6 +115,36 @@ void StudioProjectTests::appliesAndPersistsTransformOperations()
     QVERIFY(!item.transform.flipHorizontal);
 }
 
+void StudioProjectTests::composesVisibleLayersAtProgramResolution()
+{
+    StudioProject project = StudioProject::createDefault();
+    project.programResolution = ProgramResolution::qhd1440();
+    project.addSource(SourceType::Color);
+    project.addSource(SourceType::Image);
+    project.addSource(SourceType::Microphone);
+    Scene *scene = project.activeScene();
+    QCOMPARE(scene->items.size(), 3);
+    scene->items[0].transform.width = 2560.0;
+    scene->items[0].transform.height = 1440.0;
+    scene->items[1].transform.x = 250.0;
+    scene->items[1].transform.y = 120.0;
+    scene->items[1].transform.rotation = 25.0;
+    scene->items[1].transform.flipHorizontal = true;
+
+    QVector<CompositorLayer> layers = CompositorScene::activeLayers(project);
+    QCOMPARE(layers.size(), 2);
+    QCOMPARE(layers[0].zOrder, 0);
+    QCOMPARE(layers[1].zOrder, 1);
+    QCOMPARE(layers[0].frame.pixelSize, QSize(2560, 1440));
+    QCOMPARE(layers[1].transform.rotation, 25.0);
+    QVERIFY(layers[1].transform.flipHorizontal);
+
+    QVERIFY(project.setSceneItemVisible(scene->items[0].id, false));
+    layers = CompositorScene::activeLayers(project);
+    QCOMPARE(layers.size(), 1);
+    QCOMPARE(layers[0].sceneItemId, scene->items[1].id);
+}
+
 void StudioProjectTests::persistsAndRestoresProject()
 {
     QTemporaryDir directory;
@@ -120,6 +152,7 @@ void StudioProjectTests::persistsAndRestoresProject()
     StudioRepository repository(directory.path());
     StudioProject project = StudioProject::createDefault();
     project.profileName = QStringLiteral("Creator Profile");
+    project.programResolution = ProgramResolution::qhd1440();
     project.transition = {TransitionType::Fade, 850};
     const QString imageId = project.addSource(SourceType::Image).id;
     project.addSource(SourceType::Microphone);
@@ -136,6 +169,7 @@ void StudioProjectTests::persistsAndRestoresProject()
 
     const StudioProject restored = repository.load();
     QCOMPARE(restored.profileName, QStringLiteral("Creator Profile"));
+    QCOMPARE(restored.programResolution, ProgramResolution::qhd1440());
     QCOMPARE(restored.transition.durationMs, 850);
     QCOMPARE(restored.sources.size(), 3);
     QCOMPARE(restored.sources.first().id, imageId);
