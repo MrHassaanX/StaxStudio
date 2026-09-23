@@ -10,12 +10,14 @@ ComboBox {
     indicator: StudioIcon { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; name: "chevron"; color: root.enabled ? "#B8C9CD" : "#607076" }
     background: Rectangle { radius: 4; color: root.hovered ? "#24343A" : "#1B292E"; border.color: root.activeFocus ? "#6C8F7D" : "#344850" }
     delegate: ItemDelegate {
+        id: option
+        required property int index
         required property string modelData
         width: root.popup.width
         height: 34
         highlighted: root.highlightedIndex === index
-        contentItem: Text { text: modelData; color: highlighted ? "#F0F6F4" : "#BFCCCF"; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; leftPadding: 10 }
-        background: Rectangle { color: parent.highlighted ? "#2A4140" : "transparent"; radius: 3 }
+        contentItem: Text { text: option.modelData; color: option.highlighted ? "#F0F6F4" : "#BFCCCF"; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; leftPadding: 10; elide: Text.ElideRight }
+        background: Rectangle { color: option.highlighted || option.hovered ? "#2A4140" : (root.currentIndex === option.index ? "#223638" : "transparent"); radius: 3 }
     }
     popup: Popup {
         y: root.height + 4

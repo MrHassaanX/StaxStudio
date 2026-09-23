@@ -6,8 +6,8 @@ import "components"
 ApplicationWindow {
     id: root
 
-    width: 1440
-    height: 900
+    width: Math.min(1440, Screen.desktopAvailableWidth - 32)
+    height: Math.min(900, Screen.desktopAvailableHeight - 48)
     minimumWidth: 1280
     minimumHeight: 760
     visible: true

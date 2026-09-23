@@ -14,6 +14,7 @@ private slots:
     void protectsValidSceneState();
     void reordersScenesAndItems();
     void managesSourceLayerState();
+    void appliesAndPersistsTransformOperations();
     void persistsAndRestoresProject();
     void recoversFromInvalidConfiguration();
     void recoversFromUnsupportedSchema();
@@ -77,6 +78,41 @@ void StudioProjectTests::managesSourceLayerState()
     QVERIFY(project.sources.isEmpty());
 }
 
+void StudioProjectTests::appliesAndPersistsTransformOperations()
+{
+    StudioProject project = StudioProject::createDefault();
+    project.addSource(SourceType::Image);
+    SceneItem &item = project.activeScene()->items.first();
+    const QString itemId = item.id;
+
+    Transform transform = item.transform;
+    transform.x = 200.0;
+    transform.y = 100.0;
+    transform.width = 640.0;
+    transform.height = 360.0;
+    transform.scaleX = 1.5;
+    transform.scaleY = 1.5;
+    transform.cropLeft = 10.0;
+    transform.cropRight = 10.0;
+    QVERIFY(project.setSceneItemTransform(itemId, transform));
+    QVERIFY(project.centerSceneItem(itemId, true, false));
+    QCOMPARE(item.transform.x, 495.0);
+    QCOMPARE(item.transform.y, 100.0);
+    QVERIFY(project.rotateSceneItem(itemId, 90.0));
+    QCOMPARE(item.transform.rotation, 90.0);
+    QVERIFY(project.flipSceneItem(itemId, true));
+    QVERIFY(item.transform.flipHorizontal);
+    QVERIFY(project.fitSceneItemToCanvas(itemId));
+    QCOMPARE(item.transform.x, 30.0);
+    QCOMPARE(item.transform.y, 0.0);
+    QCOMPARE(item.transform.width, 1860.0);
+    QCOMPARE(item.transform.height, 1080.0);
+    QVERIFY(project.stretchSceneItemToCanvas(itemId));
+    QVERIFY(project.resetSceneItemTransform(itemId));
+    QCOMPARE(item.transform.rotation, 0.0);
+    QVERIFY(!item.transform.flipHorizontal);
+}
+
 void StudioProjectTests::persistsAndRestoresProject()
 {
     QTemporaryDir directory;
@@ -85,10 +121,13 @@ void StudioProjectTests::persistsAndRestoresProject()
     StudioProject project = StudioProject::createDefault();
     project.profileName = QStringLiteral("Creator Profile");
     project.transition = {TransitionType::Fade, 850};
-    Source &source = project.addSource(SourceType::Image);
+    const QString imageId = project.addSource(SourceType::Image).id;
+    project.addSource(SourceType::Microphone);
+    project.addSource(SourceType::DesktopAudio);
     SceneItem &item = project.activeScene()->items.first();
     item.transform.x = 120.0;
     item.transform.width = 640.0;
+    item.transform.flipHorizontal = true;
     project.setSceneItemVisible(item.id, false);
     project.setSceneItemLocked(item.id, true);
     project.setMixerVolume(project.mixerChannels.first().id, 0.42);
@@ -98,11 +137,12 @@ void StudioProjectTests::persistsAndRestoresProject()
     const StudioProject restored = repository.load();
     QCOMPARE(restored.profileName, QStringLiteral("Creator Profile"));
     QCOMPARE(restored.transition.durationMs, 850);
-    QCOMPARE(restored.sources.size(), 1);
-    QCOMPARE(restored.sources.first().id, source.id);
+    QCOMPARE(restored.sources.size(), 3);
+    QCOMPARE(restored.sources.first().id, imageId);
     const SceneItem &restoredItem = restored.activeScene()->items.first();
     QCOMPARE(restoredItem.transform.x, 120.0);
     QCOMPARE(restoredItem.transform.width, 640.0);
+    QVERIFY(restoredItem.transform.flipHorizontal);
     QVERIFY(!restoredItem.visible);
     QVERIFY(restoredItem.locked);
     QCOMPARE(restored.mixerChannels.first().volume, 0.42);
@@ -121,7 +161,7 @@ void StudioProjectTests::recoversFromInvalidConfiguration()
     const StudioProject recovered = repository.load();
     QVERIFY(!recovered.scenes.isEmpty());
     QVERIFY(recovered.activeScene() != nullptr);
-    QCOMPARE(recovered.mixerChannels.size(), 2);
+    QCOMPARE(recovered.mixerChannels.size(), 0);
 }
 
 void StudioProjectTests::recoversFromUnsupportedSchema()
@@ -194,9 +234,10 @@ void StudioProjectTests::keepsModelsConsistentThroughRepeatedLifecycleChanges()
 
     for (int cycle = 0; cycle < 25; ++cycle) {
         const QString sceneId = scenes.addScene(QStringLiteral("Cycle %1").arg(cycle));
+        items.beginSceneChange();
         project.activeSceneId = sceneId;
         scenes.notifyActiveSceneChanged();
-        items.resetForActiveScene();
+        items.endSceneChange();
 
         const QString windowItemId = items.addSource(SourceType::WindowCapture, QStringLiteral("Window %1").arg(cycle));
         const QString imageItemId = items.addSource(SourceType::Image, QStringLiteral("Image %1").arg(cycle));
@@ -206,9 +247,10 @@ void StudioProjectTests::keepsModelsConsistentThroughRepeatedLifecycleChanges()
         QVERIFY(items.removeItem(windowItemId));
         QCOMPARE(items.rowCount(), 1);
 
+        items.beginSceneChange();
         project.activeSceneId = project.scenes.first().id;
         scenes.notifyActiveSceneChanged();
-        items.resetForActiveScene();
+        items.endSceneChange();
         QVERIFY(scenes.removeScene(sceneId));
         QCOMPARE(project.sceneIndex(sceneId), -1);
         QVERIFY(project.activeScene() != nullptr);

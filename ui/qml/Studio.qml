@@ -11,6 +11,9 @@ Item {
     property string renameSourceId: ""
     property string deleteSceneId: ""
     property string removeItemId: ""
+    property string removeSourceId: ""
+    property string propertiesSourceId: ""
+    property string propertiesSourceType: ""
     property string selectedSourceType: ""
 
     Rectangle { anchors.fill: parent; color: "#0F171A" }
@@ -80,15 +83,19 @@ Item {
                         }
                         ListView {
                             id: scenesView
+                            objectName: "scenesView"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
                             spacing: 3
                             model: studioController.scenesModel
+                            currentIndex: studioController.activeSceneIndex
+                            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
                             delegate: SceneRow {
-                                required property string sceneId
-                                required property string name
-                                required property bool active
+                                required property int index
+                                canDelete: scenesView.count > 1
+                                canMoveUp: index > 0
+                                canMoveDown: index < scenesView.count - 1
                                 width: scenesView.width
                                 onSelected: studioController.selectScene(sceneId)
                                 onRenameRequested: { root.renameSceneId = sceneId; renameSceneField.text = name; renameSceneDialog.open() }
@@ -110,26 +117,34 @@ Item {
                         }
                         ListView {
                             id: sourcesView
+                            objectName: "sourcesView"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
                             spacing: 4
                             model: studioController.sceneItemsModel
                             delegate: SourceRow {
-                                required property string itemId
-                                required property string sourceId
-                                required property string name
-                                required property string type
-                                required property bool itemVisible
-                                required property bool itemLocked
-                                required property bool selected
+                                required property int index
+                                canMoveUp: index > 0
+                                canMoveDown: index < sourcesView.count - 1
                                 width: sourcesView.width
                                 onSelectedRequested: studioController.selectItem(itemId)
                                 onRenameRequested: { root.renameSourceId = sourceId; renameSourceField.text = name; renameSourceDialog.open() }
                                 onVisibleRequested: value => studioController.setItemVisible(itemId, value)
                                 onLockedRequested: value => studioController.setItemLocked(itemId, value)
                                 onMoveRequested: direction => studioController.moveSceneItem(itemId, direction)
-                                onRemoveRequested: { root.removeItemId = itemId; removeSourceDialog.open() }
+                                onRemoveRequested: { root.removeSourceId = ""; root.removeItemId = itemId; removeSourceDialog.open() }
+                                onMoveToRequested: targetIndex => studioController.moveSceneItemTo(itemId, targetIndex < 0 ? sourcesView.count - 1 : targetIndex)
+                                onTransformRequested: action => {
+                                    if (action === "edit") transformDialog.openFor(itemId, studioController.itemTransform(itemId))
+                                    else studioController.applyTransformAction(itemId, action)
+                                }
+                                onPropertiesRequested: {
+                                    root.propertiesSourceId = sourceId
+                                    root.propertiesSourceType = type
+                                    sourcePropertiesName.text = name
+                                    sourcePropertiesDialog.open()
+                                }
                             }
                         }
                         Text { Layout.fillWidth: true; visible: sourcesView.count === 0; text: "Add a source to start composing this scene."; color: "#829399"; font.pixelSize: 11; wrapMode: Text.WordWrap }
@@ -164,10 +179,11 @@ Item {
                             clip: true
                             Rectangle {
                                 id: previewCanvas
+                                objectName: "previewCanvas"
                                 anchors.centerIn: parent
                                 width: Math.min(parent.width, parent.height * 16 / 9)
                                 height: Math.round(width * 9 / 16)
-                                color: "#0A0F11"
+                                color: "#000000"
                                 border.color: "#48616A"
                                 border.width: 1
                                 clip: true
@@ -176,10 +192,10 @@ Item {
                                     anchors.fill: parent
                                     anchors.margins: 1
                                     clip: true
-                                    Rectangle { anchors.fill: parent; color: "#152329" }
                                     Repeater {
                                         model: studioController.sceneItemsModel
                                         delegate: Rectangle {
+                                            id: previewItem
                                             required property string itemId
                                             required property string name
                                             required property string type
@@ -187,16 +203,29 @@ Item {
                                             required property bool itemLocked
                                             required property bool selected
                                             required property bool visual
+                                            required property int zOrder
                                             required property real programX
                                             required property real programY
                                             required property real programWidth
                                             required property real programHeight
-                                            x: Math.max(0, programX / 1920 * programLayer.width)
-                                            y: Math.max(0, programY / 1080 * programLayer.height)
-                                            width: Math.min(programLayer.width - x, Math.max(0, programWidth / 1920 * programLayer.width))
-                                            height: Math.min(programLayer.height - y, Math.max(0, programHeight / 1080 * programLayer.height))
+                                            required property real programScaleX
+                                            required property real programScaleY
+                                            required property real programRotation
+                                            required property real cropLeft
+                                            required property real cropTop
+                                            required property real cropRight
+                                            required property real cropBottom
+                                            required property bool flipHorizontal
+                                            required property bool flipVertical
+                                            x: (programX + cropLeft * programScaleX) / 1920 * programLayer.width
+                                            y: (programY + cropTop * programScaleY) / 1080 * programLayer.height
+                                            width: Math.max(0, (programWidth - cropLeft - cropRight) * programScaleX / 1920 * programLayer.width)
+                                            height: Math.max(0, (programHeight - cropTop - cropBottom) * programScaleY / 1080 * programLayer.height)
                                             z: zOrder + 1
                                             visible: itemVisible && visual && width > 0 && height > 0
+                                            rotation: programRotation
+                                            transformOrigin: Item.Center
+                                            transform: Scale { origin.x: previewItem.width / 2; origin.y: previewItem.height / 2; xScale: previewItem.flipHorizontal ? -1 : 1; yScale: previewItem.flipVertical ? -1 : 1 }
                                             radius: 2
                                             color: type === "Image" ? "#704251" : (type === "Text" ? "#4A4670" : "#284F58")
                                             border.color: selected ? root.accent : (itemLocked ? "#AAB5B7" : "#66858C")
@@ -206,15 +235,7 @@ Item {
                                             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: studioController.selectItem(itemId) }
                                         }
                                     }
-                                    Column {
-                                        anchors.centerIn: parent
-                                        visible: sourcesView.count === 0
-                                        spacing: 7
-                                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Start with a source"; color: "#E1EAEB"; font.pixelSize: 18; font.weight: Font.DemiBold }
-                                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "The preview will show your future program composition."; color: "#91A2A6"; font.pixelSize: 12 }
-                                    }
                                 }
-                                Text { anchors.left: parent.left; anchors.leftMargin: 9; anchors.bottom: parent.bottom; anchors.bottomMargin: 7; text: "1920 x 1080"; color: "#8BA0A5"; font.pixelSize: 10; z: 10 }
                             }
                         }
                     }
@@ -223,7 +244,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 46
                     RowLayout { anchors.fill: parent; spacing: 8
-                        Rectangle { width: 8; height: 8; radius: 4; color: root.accent }
+                        Rectangle { Layout.preferredWidth: 8; Layout.preferredHeight: 8; radius: 4; color: root.accent }
                         Text { Layout.fillWidth: true; text: studioController.statusMessage; color: "#AEBEC1"; font.pixelSize: 11; elide: Text.ElideRight }
                         Text { text: "Saved locally"; color: root.accent; font.pixelSize: 11; font.weight: Font.DemiBold }
                     }
@@ -245,21 +266,22 @@ Item {
                         StudioSectionHeader { title: "Audio Mixer"; subtitle: "Inputs are inactive" }
                         ListView {
                             id: mixerView
+                            objectName: "mixerView"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
-                            spacing: 12
+                            spacing: 5
                             model: studioController.mixerModel
                             delegate: MixerChannel {
-                                required property string channelId
-                                required property string name
-                                required property real volume
-                                required property bool muted
                                 width: mixerView.width
                                 onVolumeChangedByUser: value => studioController.setMixerVolume(channelId, value)
                                 onMuteRequested: value => studioController.setMixerMuted(channelId, value)
+                                onResetVolumeRequested: studioController.setMixerVolume(channelId, 1.0)
+                                onRenameRequested: { root.renameSourceId = channelId; renameSourceField.text = name; renameSourceDialog.open() }
+                                onRemoveRequested: { root.removeItemId = ""; root.removeSourceId = channelId; removeSourceDialog.open() }
                             }
                         }
+                        Text { Layout.fillWidth: true; visible: mixerView.count === 0; text: "No audio channels. Add a microphone or desktop-audio placeholder."; color: "#829399"; font.pixelSize: 11; wrapMode: Text.WordWrap }
                     }
                 }
                 StudioPanel {
@@ -279,16 +301,20 @@ Item {
                     }
                 }
                 StudioPanel {
+                    id: controlsPanel
+                    objectName: "controlsPanel"
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 214
+                    Layout.minimumHeight: controlsLayout.implicitHeight + contentMargin * 2
+                    Layout.preferredHeight: Layout.minimumHeight
                     color: "#172529"
                     ColumnLayout {
+                        id: controlsLayout
                         anchors.fill: parent
                         spacing: 8
                         StudioSectionHeader { title: "Controls"; subtitle: "Output is not connected" }
                         StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Start streaming"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
                         StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Start recording"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
-                        StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Record + stream"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
+                        StudioButton { objectName: "combinedOutputButton"; Layout.fillWidth: true; implicitHeight: 34; text: "Record + stream"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
                     }
                 }
             }
@@ -324,7 +350,12 @@ Item {
     StudioDialog {
         id: removeSourceDialog; modal: true; title: "Remove source?"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
         contentItem: Text { text: "This removes the source from the current scene."; color: "#DCE6E7"; width: 280; wrapMode: Text.WordWrap }
-        onAccepted: studioController.removeSceneItem(root.removeItemId)
+        onAccepted: {
+            if (root.removeItemId.length > 0) studioController.removeSceneItem(root.removeItemId)
+            else if (root.removeSourceId.length > 0) studioController.removeSourceFromActiveScene(root.removeSourceId)
+            root.removeItemId = ""
+            root.removeSourceId = ""
+        }
     }
     StudioDialog {
         id: sourcePickerDialog
@@ -352,5 +383,22 @@ Item {
             Text { text: "Coming later: Browser Source, Media Source"; color: "#72858A"; font.pixelSize: 11 }
             StudioTextField { id: sourceNameField; Layout.fillWidth: true; placeholderText: root.selectedSourceType.length > 0 ? root.selectedSourceType + " name" : "Choose a source type first"; enabled: root.selectedSourceType.length > 0; selectByMouse: true; onTextChanged: sourcePickerDialog.standardButton(Dialog.Ok).enabled = root.selectedSourceType.length > 0 && text.trim().length > 0 }
         }
+    }
+    StudioDialog {
+        id: sourcePropertiesDialog; objectName: "sourcePropertiesDialog"; modal: true; title: "Source properties"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
+        onOpened: sourcePropertiesName.forceActiveFocus()
+        onAccepted: studioController.renameSource(root.propertiesSourceId, sourcePropertiesName.text)
+        contentItem: ColumnLayout {
+            implicitWidth: 320
+            spacing: 8
+            Text { text: root.propertiesSourceType + " placeholder"; color: "#829399"; font.pixelSize: 11 }
+            Text { text: "Source name"; color: "#B6C6C9"; font.pixelSize: 12 }
+            StudioTextField { id: sourcePropertiesName; Layout.fillWidth: true; selectByMouse: true }
+        }
+    }
+    TransformDialog {
+        id: transformDialog
+        anchors.centerIn: parent
+        onTransformAccepted: values => studioController.setItemTransform(sceneItemId, values)
     }
 }

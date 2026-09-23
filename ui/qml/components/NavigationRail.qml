@@ -2,6 +2,7 @@ import QtQuick
 
 Item {
     id: root
+    clip: true
 
     property string currentPage: appController.activePage
 
@@ -106,9 +107,12 @@ Item {
                         anchors {
                             left: parent.left
                         leftMargin: 43
+                            right: parent.right
+                            rightMargin: 10
                             verticalCenter: parent.verticalCenter
                         }
                         text: navigationItem.modelData.label
+                        elide: Text.ElideRight
                         color: navigationItem.selected ? "#FFFFFF" : "#C7D4D6"
                         font.pixelSize: 14
                         font.weight: navigationItem.selected ? Font.DemiBold : Font.Normal
@@ -127,18 +131,21 @@ Item {
         }
 
         Rectangle {
+            id: smartModePanel
+            objectName: "smartModePanel"
             anchors {
                 left: parent.left
                 right: parent.right
                 bottom: parent.bottom
                 margins: 18
             }
-            height: 72
+            height: smartModeContent.implicitHeight + 24
             radius: 8
             color: "#1B3036"
             border.color: "#294850"
 
             Column {
+                id: smartModeContent
                 anchors {
                     fill: parent
                 margins: 12
@@ -146,6 +153,7 @@ Item {
                 spacing: 5
 
                 Text {
+                    width: parent.width
                     text: "Smart mode"
                     color: "#F0F5F4"
                     font.pixelSize: 13
@@ -153,6 +161,9 @@ Item {
                 }
 
                 Text {
+                    objectName: "smartModeDescription"
+                    width: parent.width
+                    wrapMode: Text.WordWrap
                     text: "Recommendations arrive with hardware setup"
                     color: "#8FA6A9"
                     font.pixelSize: 12

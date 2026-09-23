@@ -5,6 +5,8 @@ ToolButton {
     id: root
     property string iconName: "more"
     property string tooltip: ""
+    objectName: tooltip
+    Accessible.name: tooltip
     implicitWidth: 30
     implicitHeight: 30
     contentItem: StudioIcon { anchors.centerIn: parent; name: root.iconName; color: root.enabled ? (root.hovered ? "#EDF4F5" : "#B6C7CB") : "#5F7076" }

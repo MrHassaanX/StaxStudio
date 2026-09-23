@@ -4,6 +4,7 @@
 #include "core/project/StudioRepository.h"
 
 #include <QObject>
+#include <QVariantMap>
 
 class StudioController final : public QObject
 {
@@ -12,6 +13,7 @@ class StudioController final : public QObject
     Q_PROPERTY(QAbstractItemModel *sceneItemsModel READ sceneItemsModel CONSTANT FINAL)
     Q_PROPERTY(QAbstractItemModel *mixerModel READ mixerModel CONSTANT FINAL)
     Q_PROPERTY(QString activeSceneName READ activeSceneName NOTIFY projectChanged FINAL)
+    Q_PROPERTY(int activeSceneIndex READ activeSceneIndex NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString selectedItemId READ selectedItemId NOTIFY selectedItemChanged FINAL)
     Q_PROPERTY(QString profileName READ profileName NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString transitionType READ transitionType NOTIFY projectChanged FINAL)
@@ -19,10 +21,12 @@ class StudioController final : public QObject
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged FINAL)
 public:
     explicit StudioController(QObject *parent = nullptr);
+    explicit StudioController(const QString &storageDirectory, QObject *parent = nullptr);
     QAbstractItemModel *scenesModel();
     QAbstractItemModel *sceneItemsModel();
     QAbstractItemModel *mixerModel();
     QString activeSceneName() const;
+    int activeSceneIndex() const;
     QString selectedItemId() const;
     QString profileName() const;
     QString transitionType() const;
@@ -38,9 +42,14 @@ public:
     Q_INVOKABLE void renameSource(const QString &sourceId, const QString &name);
     Q_INVOKABLE void removeSceneItem(const QString &itemId);
     Q_INVOKABLE void moveSceneItem(const QString &itemId, int direction);
+    Q_INVOKABLE void moveSceneItemTo(const QString &itemId, int targetIndex);
     Q_INVOKABLE void setItemVisible(const QString &itemId, bool visible);
     Q_INVOKABLE void setItemLocked(const QString &itemId, bool locked);
     Q_INVOKABLE void selectItem(const QString &itemId);
+    Q_INVOKABLE QVariantMap itemTransform(const QString &itemId) const;
+    Q_INVOKABLE void setItemTransform(const QString &itemId, const QVariantMap &values);
+    Q_INVOKABLE void applyTransformAction(const QString &itemId, const QString &action);
+    Q_INVOKABLE void removeSourceFromActiveScene(const QString &sourceId);
     Q_INVOKABLE void setMixerVolume(const QString &channelId, double volume);
     Q_INVOKABLE void setMixerMuted(const QString &channelId, bool muted);
     Q_INVOKABLE void setTransitionType(const QString &type);
@@ -54,7 +63,7 @@ signals:
     void statusMessageChanged();
 
 private:
-    void refresh(bool sceneChanged = false);
+    void refresh();
     void save();
     StudioRepository repository_;
     StudioProject project_;

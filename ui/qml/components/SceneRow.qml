@@ -7,6 +7,10 @@ Rectangle {
     required property string sceneId
     required property string name
     required property bool active
+    property bool canDelete: true
+    property bool canMoveUp: true
+    property bool canMoveDown: true
+    objectName: "sceneRow_" + sceneId
     signal selected()
     signal renameRequested()
     signal deleteRequested()
@@ -20,10 +24,12 @@ Rectangle {
     MouseArea { id: mouse; anchors.left: parent.left; anchors.right: menuButton.left; anchors.top: parent.top; anchors.bottom: parent.bottom; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.selected(); onDoubleClicked: root.renameRequested() }
     StudioMenu {
         id: options
+        x: root.width - width
+        y: root.height
         StudioMenuItem { text: "Rename"; onTriggered: root.renameRequested() }
-        StudioMenuItem { text: "Move up"; onTriggered: root.moveRequested(-1) }
-        StudioMenuItem { text: "Move down"; onTriggered: root.moveRequested(1) }
+        StudioMenuItem { text: "Move up"; enabled: root.canMoveUp; onTriggered: root.moveRequested(-1) }
+        StudioMenuItem { text: "Move down"; enabled: root.canMoveDown; onTriggered: root.moveRequested(1) }
         MenuSeparator { }
-        StudioMenuItem { text: "Delete scene"; destructive: true; onTriggered: root.deleteRequested() }
+        StudioMenuItem { text: "Delete scene"; enabled: root.canDelete; destructive: true; onTriggered: root.deleteRequested() }
     }
 }

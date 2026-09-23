@@ -1,6 +1,10 @@
 #include "StudioProject.h"
 
 #include <QUuid>
+#include <QSet>
+#include <QtMath>
+
+#include <cmath>
 
 namespace {
 QString newId()
@@ -22,6 +26,29 @@ QString uniqueName(const QString &requested, const QString &fallback, const auto
     while (contains()) candidate = QStringLiteral("%1 (%2)").arg(base).arg(suffix++);
     return candidate;
 }
+
+SceneItem *activeItem(StudioProject &project, const QString &itemId)
+{
+    Scene *scene = project.activeScene();
+    if (!scene) return nullptr;
+    for (SceneItem &item : scene->items) if (item.id == itemId) return &item;
+    return nullptr;
+}
+
+Transform sanitizedTransform(Transform value)
+{
+    value.width = qMax(1.0, value.width);
+    value.height = qMax(1.0, value.height);
+    value.scaleX = qBound(0.01, value.scaleX, 100.0);
+    value.scaleY = qBound(0.01, value.scaleY, 100.0);
+    value.rotation = std::fmod(value.rotation, 360.0);
+    if (value.rotation < 0.0) value.rotation += 360.0;
+    value.cropLeft = qBound(0.0, value.cropLeft, value.width - 1.0);
+    value.cropRight = qBound(0.0, value.cropRight, value.width - value.cropLeft - 1.0);
+    value.cropTop = qBound(0.0, value.cropTop, value.height - 1.0);
+    value.cropBottom = qBound(0.0, value.cropBottom, value.height - value.cropTop - 1.0);
+    return value;
+}
 }
 
 StudioProject StudioProject::createDefault()
@@ -33,8 +60,6 @@ StudioProject StudioProject::createDefault()
     project.addScene(QStringLiteral("Starting Soon"));
     project.addScene(QStringLiteral("BRB"));
     project.activeSceneId = project.scenes.first().id;
-    project.mixerChannels = {{newId(), QStringLiteral("Desktop Audio"), 0.8, false},
-                             {newId(), QStringLiteral("Microphone"), 0.8, false}};
     return project;
 }
 
@@ -84,10 +109,12 @@ Scene &StudioProject::addScene(const QString &requestedName)
 
 bool StudioProject::removeScene(const QString &sceneId)
 {
+    const QString removedId = sceneId;
     const int index = sceneIndex(sceneId);
     if (index < 0 || scenes.size() <= 1) return false;
     scenes.removeAt(index);
-    if (activeSceneId == sceneId) activeSceneId = scenes[qMin(index, scenes.size() - 1)].id;
+    if (activeSceneId == removedId) activeSceneId = scenes[qMin(index, scenes.size() - 1)].id;
+    normalize();
     return true;
 }
 
@@ -118,6 +145,8 @@ Source &StudioProject::addSource(SourceType type)
     sources.append({newId(), name, type, true, {}});
     Scene *scene = activeScene();
     if (scene) scene->items.append({newId(), sources.last().id, {}, true, false, static_cast<int>(scene->items.size())});
+    if (type == SourceType::Microphone || type == SourceType::DesktopAudio)
+        mixerChannels.append({sources.last().id, name, 0.8, false});
     return sources.last();
 }
 
@@ -161,6 +190,20 @@ bool StudioProject::moveSceneItem(const QString &sceneItemId, int delta)
     return false;
 }
 
+bool StudioProject::moveSceneItemTo(const QString &sceneItemId, int targetIndex)
+{
+    Scene *scene = activeScene();
+    if (!scene) return false;
+    for (qsizetype i = 0; i < scene->items.size(); ++i) {
+        if (scene->items[i].id != sceneItemId) continue;
+        if (targetIndex < 0 || targetIndex >= scene->items.size() || targetIndex == i) return false;
+        scene->items.move(i, targetIndex);
+        normalize();
+        return true;
+    }
+    return false;
+}
+
 bool StudioProject::setSceneItemVisible(const QString &id, bool visible)
 {
     if (Scene *scene = activeScene()) for (auto &item : scene->items) if (item.id == id) { item.visible = visible; return true; }
@@ -173,6 +216,73 @@ bool StudioProject::setSceneItemLocked(const QString &id, bool locked)
     return false;
 }
 
+bool StudioProject::setSceneItemTransform(const QString &sceneItemId, const Transform &transform)
+{
+    SceneItem *item = activeItem(*this, sceneItemId);
+    if (!item) return false;
+    item->transform = sanitizedTransform(transform);
+    return true;
+}
+
+bool StudioProject::resetSceneItemTransform(const QString &sceneItemId)
+{
+    return setSceneItemTransform(sceneItemId, {});
+}
+
+bool StudioProject::fitSceneItemToCanvas(const QString &sceneItemId)
+{
+    SceneItem *item = activeItem(*this, sceneItemId);
+    if (!item) return false;
+    Transform value = item->transform;
+    const double sourceWidth = qMax(1.0, (value.width - value.cropLeft - value.cropRight) * value.scaleX);
+    const double sourceHeight = qMax(1.0, (value.height - value.cropTop - value.cropBottom) * value.scaleY);
+    const double scale = qMin(1920.0 / sourceWidth, 1080.0 / sourceHeight);
+    value.width = sourceWidth * scale;
+    value.height = sourceHeight * scale;
+    value.scaleX = 1.0;
+    value.scaleY = 1.0;
+    value.x = (1920.0 - value.width) / 2.0;
+    value.y = (1080.0 - value.height) / 2.0;
+    value.cropLeft = value.cropTop = value.cropRight = value.cropBottom = 0.0;
+    return setSceneItemTransform(sceneItemId, value);
+}
+
+bool StudioProject::stretchSceneItemToCanvas(const QString &sceneItemId)
+{
+    Transform value;
+    return setSceneItemTransform(sceneItemId, value);
+}
+
+bool StudioProject::centerSceneItem(const QString &sceneItemId, bool horizontal, bool vertical)
+{
+    SceneItem *item = activeItem(*this, sceneItemId);
+    if (!item || (!horizontal && !vertical)) return false;
+    Transform value = item->transform;
+    const double renderedWidth = (value.width - value.cropLeft - value.cropRight) * value.scaleX;
+    const double renderedHeight = (value.height - value.cropTop - value.cropBottom) * value.scaleY;
+    if (horizontal) value.x = (1920.0 - renderedWidth) / 2.0;
+    if (vertical) value.y = (1080.0 - renderedHeight) / 2.0;
+    return setSceneItemTransform(sceneItemId, value);
+}
+
+bool StudioProject::rotateSceneItem(const QString &sceneItemId, double degrees)
+{
+    SceneItem *item = activeItem(*this, sceneItemId);
+    if (!item) return false;
+    Transform value = item->transform;
+    value.rotation += degrees;
+    return setSceneItemTransform(sceneItemId, value);
+}
+
+bool StudioProject::flipSceneItem(const QString &sceneItemId, bool horizontal)
+{
+    SceneItem *item = activeItem(*this, sceneItemId);
+    if (!item) return false;
+    if (horizontal) item->transform.flipHorizontal = !item->transform.flipHorizontal;
+    else item->transform.flipVertical = !item->transform.flipVertical;
+    return true;
+}
+
 bool StudioProject::renameSource(const QString &sourceId, const QString &requestedName)
 {
     Source *value = source(sourceId);
@@ -180,6 +290,7 @@ bool StudioProject::renameSource(const QString &sourceId, const QString &request
     if (!value || trimmed.isEmpty()) return false;
     const QString old = value->name; value->name.clear(); value->name = uniqueSourceName(trimmed);
     if (value->name.isEmpty()) value->name = old;
+    for (auto &channel : mixerChannels) if (channel.id == value->id) channel.name = value->name;
     return true;
 }
 
@@ -200,4 +311,17 @@ void StudioProject::normalize()
     if (scenes.isEmpty()) addScene(QStringLiteral("Gameplay"));
     if (sceneIndex(activeSceneId) < 0) activeSceneId = scenes.first().id;
     for (auto &scene : scenes) for (qsizetype i = 0; i < scene.items.size(); ++i) scene.items[i].zOrder = static_cast<int>(i);
+    QSet<QString> referencedSources;
+    for (const auto &scene : scenes) for (const auto &item : scene.items) referencedSources.insert(item.sourceId);
+    sources.removeIf([&](const Source &source) { return !referencedSources.contains(source.id); });
+    // Mixer IDs are source IDs: legacy standalone demo channels have no owner.
+    QVector<MixerChannel> channels;
+    for (const Source &source : sources) {
+        if (source.type != SourceType::Microphone && source.type != SourceType::DesktopAudio) continue;
+        MixerChannel channel{source.id, source.name, 0.8, false};
+        for (const auto &saved : mixerChannels) if (saved.id == source.id) { channel = saved; break; }
+        channel.name = source.name;
+        channels.append(channel);
+    }
+    mixerChannels = std::move(channels);
 }

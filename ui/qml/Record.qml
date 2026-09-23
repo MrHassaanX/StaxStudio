@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "components"
 
 Item {
     anchors.fill: parent
@@ -66,7 +67,7 @@ Item {
                         font.pixelSize: 14
                     }
 
-                    ComboBox {
+                    StudioComboBox {
                         width: parent.width
                         model: ["Entire display", "Specific window", "Game"]
                     }

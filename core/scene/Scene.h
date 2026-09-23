@@ -15,6 +15,8 @@ struct Transform final {
     double cropTop = 0.0;
     double cropRight = 0.0;
     double cropBottom = 0.0;
+    bool flipHorizontal = false;
+    bool flipVertical = false;
 };
 
 struct SceneItem final {

@@ -13,7 +13,8 @@ QJsonObject transformToJson(const Transform &value)
     return {{"x", value.x}, {"y", value.y}, {"width", value.width}, {"height", value.height},
             {"scaleX", value.scaleX}, {"scaleY", value.scaleY}, {"rotation", value.rotation},
             {"cropLeft", value.cropLeft}, {"cropTop", value.cropTop}, {"cropRight", value.cropRight},
-            {"cropBottom", value.cropBottom}};
+            {"cropBottom", value.cropBottom}, {"flipHorizontal", value.flipHorizontal},
+            {"flipVertical", value.flipVertical}};
 }
 
 Transform transformFromJson(const QJsonObject &json)
@@ -25,6 +26,8 @@ Transform transformFromJson(const QJsonObject &json)
     value.rotation = json.value("rotation").toDouble(); value.cropLeft = json.value("cropLeft").toDouble();
     value.cropTop = json.value("cropTop").toDouble(); value.cropRight = json.value("cropRight").toDouble();
     value.cropBottom = json.value("cropBottom").toDouble();
+    value.flipHorizontal = json.value("flipHorizontal").toBool(false);
+    value.flipVertical = json.value("flipVertical").toBool(false);
     return value;
 }
 }
@@ -79,7 +82,7 @@ StudioProject StudioRepository::load() const
     const QJsonObject transition = root.value("transition").toObject();
     project.transition.type = transition.value("type").toString() == "Cut" ? TransitionType::Cut : TransitionType::Fade;
     project.transition.durationMs = qBound(50, transition.value("durationMs").toInt(300), 10000);
-    if (project.profileId.isEmpty() || project.profileName.trimmed().isEmpty() || project.mixerChannels.isEmpty()) return StudioProject::createDefault();
+    if (project.profileId.isEmpty() || project.profileName.trimmed().isEmpty()) return StudioProject::createDefault();
     project.normalize();
     return project;
 }

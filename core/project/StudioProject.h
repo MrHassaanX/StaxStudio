@@ -39,8 +39,16 @@ public:
     Source &addSource(SourceType type);
     bool removeSceneItem(const QString &sceneItemId);
     bool moveSceneItem(const QString &sceneItemId, int delta);
+    bool moveSceneItemTo(const QString &sceneItemId, int targetIndex);
     bool setSceneItemVisible(const QString &sceneItemId, bool visible);
     bool setSceneItemLocked(const QString &sceneItemId, bool locked);
+    bool setSceneItemTransform(const QString &sceneItemId, const Transform &transform);
+    bool resetSceneItemTransform(const QString &sceneItemId);
+    bool fitSceneItemToCanvas(const QString &sceneItemId);
+    bool stretchSceneItemToCanvas(const QString &sceneItemId);
+    bool centerSceneItem(const QString &sceneItemId, bool horizontal, bool vertical);
+    bool rotateSceneItem(const QString &sceneItemId, double degrees);
+    bool flipSceneItem(const QString &sceneItemId, bool horizontal);
     bool renameSource(const QString &sourceId, const QString &requestedName);
     bool setMixerVolume(const QString &channelId, double volume);
     bool setMixerMuted(const QString &channelId, bool muted);

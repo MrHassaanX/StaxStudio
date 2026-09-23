@@ -51,6 +51,7 @@ qt_add_qml_module(StaxStudio
         ui/qml/Settings.qml
         ui/qml/Studio.qml
         ui/qml/components/ActionTile.qml
+        ui/qml/components/AudioMeter.qml
         ui/qml/components/IconButton.qml
         ui/qml/components/MixerChannel.qml
         ui/qml/components/PanelHeader.qml
@@ -67,6 +68,7 @@ qt_add_qml_module(StaxStudio
         ui/qml/components/StudioMenuItem.qml
         ui/qml/components/StudioSlider.qml
         ui/qml/components/StudioTextField.qml
+        ui/qml/components/TransformDialog.qml
 )
 
 target_include_directories(StaxStudio
@@ -135,3 +137,21 @@ if(WIN32)
 endif()
 
 add_test(NAME StaxStudioTests COMMAND StaxStudioTests)
+
+qt_add_executable(StaxStudioUiTests
+    tests/StudioUiTests.cpp
+    core/project/StudioProject.cpp
+    core/project/StudioRepository.cpp
+    core/source/Source.cpp
+    ui/controllers/AppController.cpp
+    ui/controllers/StudioController.cpp
+    ui/controllers/StudioModels.cpp
+)
+target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Test)
+add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
+set_tests_properties(StaxStudioUiTests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"
+    TIMEOUT 60
+)

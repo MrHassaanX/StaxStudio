@@ -26,7 +26,7 @@ class SceneItemListModel final : public QAbstractListModel
 {
     Q_OBJECT
 public:
-    enum Role { IdRole = Qt::UserRole + 1, SourceIdRole, NameRole, TypeRole, ItemVisibleRole, ItemLockedRole, ZOrderRole, SelectedRole, VisualRole, XRole, YRole, WidthRole, HeightRole };
+    enum Role { IdRole = Qt::UserRole + 1, SourceIdRole, NameRole, TypeRole, ItemVisibleRole, ItemLockedRole, ZOrderRole, SelectedRole, VisualRole, XRole, YRole, WidthRole, HeightRole, ScaleXRole, ScaleYRole, RotationRole, CropLeftRole, CropTopRole, CropRightRole, CropBottomRole, FlipHorizontalRole, FlipVerticalRole };
     explicit SceneItemListModel(StudioProject *project, QString *selectedItemId, QObject *parent = nullptr);
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -35,9 +35,13 @@ public:
     bool renameSource(const QString &sourceId, const QString &name);
     bool removeItem(const QString &itemId);
     bool moveItem(const QString &itemId, int direction);
+    bool moveItemTo(const QString &itemId, int targetIndex);
     bool setItemVisible(const QString &itemId, bool visible);
     bool setItemLocked(const QString &itemId, bool locked);
-    void resetForActiveScene();
+    bool setItemTransform(const QString &itemId, const Transform &transform);
+    bool applyTransformAction(const QString &itemId, const QString &action);
+    void beginSceneChange();
+    void endSceneChange();
     void notifySelectionChanged(const QString &previousId, const QString &currentId);
 private:
     int itemRow(const QString &itemId) const;
@@ -57,6 +61,8 @@ public:
     QHash<int, QByteArray> roleNames() const override;
     bool setVolume(const QString &id, double volume);
     bool setMuted(const QString &id, bool muted);
+    void synchronize();
 private:
     StudioProject *project_;
+    QVector<MixerChannel> channels_;
 };
