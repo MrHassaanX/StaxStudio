@@ -223,9 +223,10 @@ QVariant MixerListModel::data(const QModelIndex &index, int role) const
     if (role == NameRole) return channel.name;
     if (role == VolumeRole) return channel.volume;
     if (role == MutedRole) return channel.muted;
+    if (role == LevelDbRole) return levels_.value(channel.id, -90.0f);
     return {};
 }
-QHash<int, QByteArray> MixerListModel::roleNames() const { return {{IdRole, "channelId"}, {NameRole, "name"}, {VolumeRole, "volume"}, {MutedRole, "muted"}}; }
+QHash<int, QByteArray> MixerListModel::roleNames() const { return {{IdRole, "channelId"}, {NameRole, "name"}, {VolumeRole, "volume"}, {MutedRole, "muted"}, {LevelDbRole, "levelDb"}}; }
 bool MixerListModel::setVolume(const QString &id, double volume)
 {
     if (!project_->setMixerVolume(id, volume)) return false;
@@ -266,4 +267,10 @@ void MixerListModel::synchronize()
             emit dataChanged(index(row), index(row), {NameRole, VolumeRole, MutedRole});
         }
     }
+}
+
+void MixerListModel::setLevel(const QString &id, const float levelDb)
+{
+    levels_.insert(id, levelDb);
+    for (int row = 0; row < channels_.size(); ++row) if (channels_[row].id == id) { emit dataChanged(index(row), index(row), {LevelDbRole}); break; }
 }

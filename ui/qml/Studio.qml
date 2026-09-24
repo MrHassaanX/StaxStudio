@@ -16,6 +16,9 @@ Item {
     property string propertiesSourceId: ""
     property string propertiesSourceType: ""
     property string selectedSourceType: ""
+    property var propertyTargets: []
+    property var propertyFormats: []
+    property var propertyConfiguration: ({})
 
     Rectangle { anchors.fill: parent; color: "#0F171A" }
 
@@ -143,6 +146,9 @@ Item {
                                 onPropertiesRequested: {
                                     root.propertiesSourceId = sourceId
                                     root.propertiesSourceType = type
+                                    root.propertyConfiguration = studioController.sourceConfiguration(sourceId)
+                                    root.propertyTargets = studioController.captureTargets(type)
+                                    root.propertyFormats = type === "Webcam" ? studioController.cameraFormats(root.propertyConfiguration.targetId || "") : []
                                     sourcePropertiesName.text = name
                                     sourcePropertiesDialog.open()
                                 }
@@ -445,15 +451,63 @@ Item {
         }
     }
     StudioDialog {
-        id: sourcePropertiesDialog; objectName: "sourcePropertiesDialog"; modal: true; title: "Source properties"; standardButtons: Dialog.Ok | Dialog.Cancel; anchors.centerIn: parent
-        onOpened: sourcePropertiesName.forceActiveFocus()
-        onAccepted: studioController.renameSource(root.propertiesSourceId, sourcePropertiesName.text)
+        id: sourcePropertiesDialog
+        objectName: "sourcePropertiesDialog"
+        modal: true
+        title: "Source properties"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        onOpened: {
+            sourcePropertiesName.forceActiveFocus()
+            sourceTarget.currentIndex = root.propertyTargets.map(function(item) { return item.id }).indexOf(root.propertyConfiguration.targetId || "")
+            if (sourceTarget.currentIndex < 0 && root.propertyTargets.length > 0) sourceTarget.currentIndex = 0
+            sourceFormat.currentIndex = root.propertyFormats.map(function(item) { return item.id }).indexOf(root.propertyConfiguration.formatId || "")
+            if (sourceFormat.currentIndex < 0 && root.propertyFormats.length > 0) sourceFormat.currentIndex = 0
+        }
+        onAccepted: {
+            studioController.renameSource(root.propertiesSourceId, sourcePropertiesName.text)
+            if (root.propertyTargets.length > 0) {
+                const target = root.propertyTargets[sourceTarget.currentIndex]
+                const format = root.propertyFormats.length > 0 ? root.propertyFormats[sourceFormat.currentIndex] : null
+                studioController.configureCaptureSource(root.propertiesSourceId, target ? target.id : "", format ? format.id : "", cursorCheck.checked)
+            }
+        }
         contentItem: ColumnLayout {
-            implicitWidth: 320
-            spacing: 8
-            Text { text: root.propertiesSourceType + " placeholder"; color: "#829399"; font.pixelSize: 11 }
+            implicitWidth: 360
+            spacing: 10
+            Text { text: root.propertiesSourceType; color: "#829399"; font.pixelSize: 11 }
             Text { text: "Source name"; color: "#B6C6C9"; font.pixelSize: 12 }
             StudioTextField { id: sourcePropertiesName; Layout.fillWidth: true; selectByMouse: true }
+            Text { visible: root.propertyTargets.length > 0; text: root.propertiesSourceType === "Webcam" || root.propertiesSourceType === "Microphone" ? "Device" : (root.propertiesSourceType === "Desktop Audio" ? "Output device" : (root.propertiesSourceType === "Display Capture" ? "Display" : "Window")); color: "#B6C6C9"; font.pixelSize: 12 }
+            StudioComboBox {
+                id: sourceTarget
+                visible: root.propertyTargets.length > 0
+                Layout.fillWidth: true
+                model: root.propertyTargets.map(function(item) { return item.name + (item.detail ? " - " + item.detail : "") })
+                onActivated: {
+                    if (root.propertiesSourceType === "Webcam") {
+                        const target = root.propertyTargets[currentIndex]
+                        root.propertyFormats = target ? studioController.cameraFormats(target.id) : []
+                        sourceFormat.currentIndex = 0
+                    }
+                }
+            }
+            Text { visible: root.propertiesSourceType === "Webcam" && root.propertyFormats.length > 0; text: "Video format"; color: "#B6C6C9"; font.pixelSize: 12 }
+            CheckBox {
+                id: cursorCheck
+                visible: root.propertiesSourceType === "Display Capture" || root.propertiesSourceType === "Window Capture" || root.propertiesSourceType === "Game Capture"
+                text: "Capture cursor"
+                checked: root.propertyConfiguration.captureCursor !== false
+                contentItem: Text { text: cursorCheck.text; leftPadding: cursorCheck.indicator.width + 8; color: "#C8D5D7"; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter }
+                indicator: Rectangle { implicitWidth: 16; implicitHeight: 16; x: cursorCheck.leftPadding; y: parent.height / 2 - height / 2; radius: 3; color: cursorCheck.checked ? "#7FAE70" : "#172328"; border.color: "#526B72"; Text { anchors.centerIn: parent; visible: cursorCheck.checked; text: "✓"; color: "#102016"; font.pixelSize: 12; font.weight: Font.Bold } }
+            }
+            StudioComboBox {
+                id: sourceFormat
+                visible: root.propertiesSourceType === "Webcam" && root.propertyFormats.length > 0
+                Layout.fillWidth: true
+                model: root.propertyFormats.map(function(item) { return item.name })
+            }
+            Text { visible: root.propertyTargets.length === 0; text: "This source has no device settings yet."; color: "#829399"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         }
     }
     TransformDialog {

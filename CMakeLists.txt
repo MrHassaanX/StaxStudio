@@ -16,13 +16,28 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # QQuickRhiItem exposes QRhi through QtGui's versioned private headers. Keep that dependency in ui/render.
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick QuickControls2 ShaderTools Test)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick QuickControls2 Multimedia ShaderTools Test)
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
 qt_add_executable(StaxStudio
     WIN32
     app/main.cpp
+    core/capture/CaptureTypes.cpp
+    core/capture/CaptureTypes.h
+    core/capture/VisualSourceManager.cpp
+    core/capture/VisualSourceManager.h
+    core/capture/windows/DxgiDesktopCapture.cpp
+    core/capture/windows/DxgiDesktopCapture.h
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioTypes.h
+    core/audio/AudioInputManager.cpp
+    core/audio/AudioInputManager.h
+    core/audio/wasapi/WasapiAudioSource.cpp
+    core/audio/wasapi/WasapiAudioSource.h
     core/audio/mixer/MixerChannel.h
     core/project/StudioProject.cpp
     core/project/StudioProject.h
@@ -101,6 +116,9 @@ target_link_libraries(StaxStudio
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
+        Qt6::Multimedia
+        ole32
+        uuid
 )
 
 if(WIN32)
@@ -129,6 +147,11 @@ enable_testing()
 
 qt_add_executable(StaxStudioTests
     tests/StudioProjectTests.cpp
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/capture/CaptureTypes.cpp
     core/project/StudioProject.cpp
     core/project/StudioProject.h
     core/project/StudioRepository.cpp
@@ -142,13 +165,22 @@ qt_add_executable(StaxStudioTests
     core/source/Source.cpp
     core/source/Source.h
     core/transition/TransitionSettings.h
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioTypes.h
+    core/audio/AudioInputManager.cpp
+    core/audio/AudioInputManager.h
+    core/audio/wasapi/WasapiAudioSource.cpp
+    core/audio/wasapi/WasapiAudioSource.h
     core/audio/mixer/MixerChannel.h
     ui/controllers/StudioModels.cpp
     ui/controllers/StudioModels.h
 )
 
 target_include_directories(StaxStudioTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test ole32 uuid propsys)
 
 if(WIN32)
     add_custom_command(TARGET StaxStudioTests POST_BUILD
@@ -163,6 +195,22 @@ add_test(NAME StaxStudioTests COMMAND StaxStudioTests)
 
 qt_add_executable(StaxStudioUiTests
     tests/StudioUiTests.cpp
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioTypes.h
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioProcessing.cpp
+    core/audio/AudioProcessing.h
+    core/audio/AudioInputManager.cpp
+    core/audio/AudioInputManager.h
+    core/audio/wasapi/WasapiAudioSource.cpp
+    core/audio/wasapi/WasapiAudioSource.h
+    core/capture/CaptureTypes.cpp
+    core/capture/VisualSourceManager.cpp
+    core/capture/windows/DxgiDesktopCapture.cpp
     core/project/StudioProject.cpp
     core/project/StudioRepository.cpp
     core/render/CompositorScene.cpp
@@ -175,7 +223,7 @@ qt_add_executable(StaxStudioUiTests
 )
 target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Test)
+target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Test ole32 uuid propsys)
 add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
 set_tests_properties(StaxStudioUiTests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"

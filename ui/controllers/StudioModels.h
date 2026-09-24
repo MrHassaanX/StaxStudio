@@ -54,7 +54,7 @@ class MixerListModel final : public QAbstractListModel
 {
     Q_OBJECT
 public:
-    enum Role { IdRole = Qt::UserRole + 1, NameRole, VolumeRole, MutedRole };
+    enum Role { IdRole = Qt::UserRole + 1, NameRole, VolumeRole, MutedRole, LevelDbRole };
     explicit MixerListModel(StudioProject *project, QObject *parent = nullptr);
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -62,7 +62,9 @@ public:
     bool setVolume(const QString &id, double volume);
     bool setMuted(const QString &id, bool muted);
     void synchronize();
+    void setLevel(const QString &id, float levelDb);
 private:
     StudioProject *project_;
     QVector<MixerChannel> channels_;
+    QHash<QString, float> levels_;
 };

@@ -1,4 +1,5 @@
 #include "core/project/StudioProject.h"
+#include "core/audio/AudioProcessing.h"
 #include "core/project/StudioRepository.h"
 #include "core/render/CompositorScene.h"
 #include "ui/controllers/StudioModels.h"
@@ -23,6 +24,7 @@ private slots:
     void notifiesSceneModelMutations();
     void notifiesSourceModelMutations();
     void keepsModelsConsistentThroughRepeatedLifecycleChanges();
+    void normalizesAudioBlocks();
 };
 
 void StudioProjectTests::createsAndSelectsScenes()
@@ -292,6 +294,33 @@ void StudioProjectTests::keepsModelsConsistentThroughRepeatedLifecycleChanges()
     }
 }
 
+void StudioProjectTests::normalizesAudioBlocks()
+{
+    AudioBlock fortyEight{100, 48000, 1, {0.0f, 0.5f, -0.5f}};
+    const AudioBlock passthrough = AudioProcessing::normalizeToInternalFormat(fortyEight);
+    QCOMPARE(passthrough.sampleRate, 48000);
+    QCOMPARE(passthrough.channelCount, 1);
+    QCOMPARE(passthrough.timestampNs, 100);
+    QCOMPARE(passthrough.samples, fortyEight.samples);
+
+    AudioBlock fortyFour{200, 44100, 2, QVector<float>(441 * 2, 0.5f)};
+    AudioBlock upsampled = AudioProcessing::normalizeToInternalFormat(std::move(fortyFour));
+    QCOMPARE(upsampled.sampleRate, 48000);
+    QCOMPARE(upsampled.channelCount, 2);
+    QCOMPARE(upsampled.timestampNs, 200);
+    QCOMPARE(upsampled.samples.size(), 480 * 2);
+    QVERIFY(qAbs(upsampled.samples.first() - 0.5f) < 0.001f);
+
+    AudioBlock downsampled = AudioProcessing::normalizeToInternalFormat({300, 96000, 1, QVector<float>(960, 1.0f)});
+    QCOMPARE(downsampled.sampleRate, 48000);
+    QCOMPARE(downsampled.channelCount, 1);
+    QCOMPARE(downsampled.samples.size(), 480);
+    AudioProcessing::applyGainAndMute(downsampled, 0.5f, false);
+    QVERIFY(qAbs(downsampled.samples.first() - 0.5f) < 0.001f);
+    QVERIFY(AudioProcessing::peakDb(downsampled) < -5.9f && AudioProcessing::peakDb(downsampled) > -6.2f);
+    AudioProcessing::applyGainAndMute(downsampled, 1.0f, true);
+    QCOMPARE(AudioProcessing::peakDb(downsampled), -90.0f);
+}
 QTEST_APPLESS_MAIN(StudioProjectTests)
 
 #include "StudioProjectTests.moc"

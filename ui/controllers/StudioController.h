@@ -1,6 +1,8 @@
 #pragma once
 
 #include "StudioModels.h"
+#include "core/audio/AudioInputManager.h"
+#include "core/capture/VisualSourceManager.h"
 #include "core/project/StudioRepository.h"
 
 #include <QObject>
@@ -46,6 +48,12 @@ public:
     Q_INVOKABLE void selectScene(const QString &sceneId);
     Q_INVOKABLE void moveScene(const QString &sceneId, int direction);
     Q_INVOKABLE void addSource(const QString &typeName, const QString &name = {});
+    Q_INVOKABLE QVariantList captureTargets(const QString &typeName) const;
+    Q_INVOKABLE QVariantList cameraFormats(const QString &targetId) const;
+    Q_INVOKABLE QVariantMap sourceConfiguration(const QString &sourceId) const;
+    Q_INVOKABLE void configureCaptureSource(const QString &sourceId, const QString &targetId, const QString &formatId = QString{}, bool captureCursor = true);
+    Q_INVOKABLE QString sourceRuntimeState(const QString &sourceId) const;
+    Q_INVOKABLE QString sourceRuntimeMessage(const QString &sourceId) const;
     Q_INVOKABLE void renameSource(const QString &sourceId, const QString &name);
     Q_INVOKABLE void removeSceneItem(const QString &itemId);
     Q_INVOKABLE void moveSceneItem(const QString &itemId, int direction);
@@ -80,5 +88,7 @@ private:
     QString selectedItemId_;
     SceneItemListModel sceneItemsModel_;
     MixerListModel mixerModel_;
+    VisualSourceManager visualSources_;
+    AudioInputManager audioSources_;
     QString statusMessage_;
 };

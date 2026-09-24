@@ -1,6 +1,7 @@
 #include "StudioController.h"
 
 #include "core/render/CompositorScene.h"
+#include <algorithm>
 
 namespace {
 QVariantMap transformValues(const Transform &value)
@@ -19,9 +20,15 @@ StudioController::StudioController(QObject *parent)
 
 StudioController::StudioController(const QString &storageDirectory, QObject *parent)
     : QObject(parent), repository_(storageDirectory), project_(repository_.load()), scenesModel_(&project_, this),
-      sceneItemsModel_(&project_, &selectedItemId_, this), mixerModel_(&project_, this),
+      sceneItemsModel_(&project_, &selectedItemId_, this), mixerModel_(&project_, this), visualSources_(this), audioSources_(this),
       statusMessage_(QStringLiteral("Studio setup is saved locally. Media capture is not connected yet."))
 {
+    connect(&visualSources_, &VisualSourceManager::framesChanged, this, [this] { emit projectChanged(); });
+    connect(&visualSources_, &VisualSourceManager::sourceStateChanged, this, [this](const QString &) { emit projectChanged(); });
+    connect(&audioSources_, &AudioInputManager::metersChanged, this, [this] { for (const MixerChannel &channel : project_.mixerChannels) mixerModel_.setLevel(channel.id, audioSources_.levelDb(channel.id)); });
+    visualSources_.synchronizeSources(project_.sources);
+    audioSources_.synchronizeSources(project_.sources);
+    for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
 }
 
 QAbstractItemModel *StudioController::scenesModel() { return &scenesModel_; }
@@ -39,13 +46,18 @@ QVariantList StudioController::compositorLayers() const
 {
     QVariantList values;
     for (const CompositorLayer &layer : CompositorScene::activeLayers(project_)) {
+        const CapturedVideoFrame captured = visualSources_.frame(layer.sourceId);
+        const Source *source = project_.source(layer.sourceId);
         values.append(QVariantMap{{"itemId", layer.sceneItemId}, {"x", layer.transform.x}, {"y", layer.transform.y},
                                   {"width", layer.transform.width}, {"height", layer.transform.height},
                                   {"scaleX", layer.transform.scaleX}, {"scaleY", layer.transform.scaleY},
                                   {"rotation", layer.transform.rotation}, {"cropLeft", layer.transform.cropLeft},
                                   {"cropTop", layer.transform.cropTop}, {"cropRight", layer.transform.cropRight},
                                   {"cropBottom", layer.transform.cropBottom}, {"flipHorizontal", layer.transform.flipHorizontal},
-                                  {"flipVertical", layer.transform.flipVertical}, {"color", layer.frame.color}, {"zOrder", layer.zOrder}});
+                                  {"flipVertical", layer.transform.flipVertical}, {"color", layer.frame.color}, {"image", captured.image},
+                                  {"sourceType", source ? sourceTypeName(source->type) : QString{}},
+                                  {"targetId", source ? source->configuration.value("targetId").toString() : QString{}},
+                                  {"timestampNs", captured.timestampNs}, {"zOrder", layer.zOrder}});
     }
     return values;
 }
@@ -90,8 +102,37 @@ void StudioController::addSource(const QString &typeName, const QString &name)
     const SourceType type = sourceTypeFromName(typeName, &ok);
     if (!ok) return;
     sceneItemsModel_.addSource(type, name);
+    Scene *scene = project_.activeScene();
+    Source *source = scene && !scene->items.isEmpty() ? project_.source(scene->items.last().sourceId) : nullptr;
+    if (source && (type == SourceType::DisplayCapture || type == SourceType::WindowCapture || type == SourceType::GameCapture || type == SourceType::Webcam))
+        source->configuration.insert(QStringLiteral("targetId"), visualSources_.defaultTarget(type));
     refresh();
 }
+QVariantList StudioController::captureTargets(const QString &typeName) const
+{
+    bool ok = false;
+    const SourceType type = sourceTypeFromName(typeName, &ok);
+    if (!ok) return {};
+    if (type == SourceType::Microphone || type == SourceType::DesktopAudio) return audioSources_.targets(type);
+    return visualSources_.targets(type);
+}
+QVariantList StudioController::cameraFormats(const QString &targetId) const { return visualSources_.cameraFormats(targetId); }
+QVariantMap StudioController::sourceConfiguration(const QString &sourceId) const
+{
+    const Source *source = project_.source(sourceId);
+    return source ? source->configuration.toVariantMap() : QVariantMap{};
+}
+void StudioController::configureCaptureSource(const QString &sourceId, const QString &targetId, const QString &formatId, const bool captureCursor)
+{
+    Source *source = project_.source(sourceId);
+    if (!source) return;
+    source->configuration.insert(QStringLiteral("targetId"), targetId);
+    source->configuration.insert(QStringLiteral("formatId"), formatId);
+    source->configuration.insert(QStringLiteral("captureCursor"), captureCursor);
+    refresh();
+}
+QString StudioController::sourceRuntimeState(const QString &sourceId) const { const Source *source = project_.source(sourceId); return source && (source->type == SourceType::Microphone || source->type == SourceType::DesktopAudio) ? captureStateName(audioSources_.runtime(sourceId).state) : captureStateName(visualSources_.frame(sourceId).state); }
+QString StudioController::sourceRuntimeMessage(const QString &sourceId) const { const Source *source = project_.source(sourceId); return source && (source->type == SourceType::Microphone || source->type == SourceType::DesktopAudio) ? audioSources_.runtime(sourceId).message : visualSources_.frame(sourceId).message; }
 void StudioController::renameSource(const QString &id, const QString &name) { if (sceneItemsModel_.renameSource(id, name)) refresh(); }
 void StudioController::removeSceneItem(const QString &id)
 {
@@ -171,8 +212,8 @@ void StudioController::removeSourceFromActiveScene(const QString &sourceId)
     if (!scene) return;
     for (const SceneItem &item : scene->items) if (item.sourceId == sourceId) { removeSceneItem(item.id); return; }
 }
-void StudioController::setMixerVolume(const QString &id, double volume) { if (mixerModel_.setVolume(id, volume)) refresh(); }
-void StudioController::setMixerMuted(const QString &id, bool muted) { if (mixerModel_.setMuted(id, muted)) refresh(); }
+void StudioController::setMixerVolume(const QString &id, double volume) { if (mixerModel_.setVolume(id, volume)) { const auto channel = std::find_if(project_.mixerChannels.cbegin(), project_.mixerChannels.cend(), [&](const MixerChannel &value) { return value.id == id; }); if (channel != project_.mixerChannels.cend()) audioSources_.setMixControls(id, channel->volume, channel->muted); refresh(); } }
+void StudioController::setMixerMuted(const QString &id, bool muted) { if (mixerModel_.setMuted(id, muted)) { const auto channel = std::find_if(project_.mixerChannels.cbegin(), project_.mixerChannels.cend(), [&](const MixerChannel &value) { return value.id == id; }); if (channel != project_.mixerChannels.cend()) audioSources_.setMixControls(id, channel->volume, channel->muted); refresh(); } }
 void StudioController::setTransitionType(const QString &type) { project_.transition.type = type == QStringLiteral("Cut") ? TransitionType::Cut : TransitionType::Fade; refresh(); }
 void StudioController::setTransitionDurationMs(int value) { project_.transition.durationMs = qBound(50, value, 10000); refresh(); }
 void StudioController::setProfileName(const QString &name) { const QString trimmed = name.trimmed(); if (!trimmed.isEmpty()) { project_.profileName = trimmed; refresh(); } }
@@ -180,6 +221,9 @@ void StudioController::showUnavailableAction(const QString &action) { statusMess
 
 void StudioController::refresh()
 {
+    visualSources_.synchronizeSources(project_.sources);
+    audioSources_.synchronizeSources(project_.sources);
+    for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
     mixerModel_.synchronize();
     save();
     emit projectChanged();

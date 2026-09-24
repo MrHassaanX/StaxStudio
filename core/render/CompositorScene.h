@@ -10,6 +10,7 @@ class StudioProject;
 
 struct CompositorLayer final {
     QString sceneItemId;
+    QString sourceId;
     Transform transform;
     VisualSourceFrame frame;
     int zOrder = 0;

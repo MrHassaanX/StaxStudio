@@ -8,6 +8,7 @@ ColumnLayout {
     required property string name
     required property double volume
     required property bool muted
+    required property double levelDb
     objectName: "mixerRow_" + channelId
     signal volumeChangedByUser(double value)
     signal muteRequested(bool muted)
@@ -24,7 +25,7 @@ ColumnLayout {
         IconButton { iconName: "more"; tooltip: "Audio options"; onClicked: options.open() }
     }
     RowLayout { Layout.fillWidth: true; spacing: 7
-        AudioMeter { Layout.preferredWidth: 27; Layout.preferredHeight: 21; muted: root.muted }
+        AudioMeter { Layout.preferredWidth: 27; Layout.preferredHeight: 21; muted: root.muted; levelDb: root.levelDb }
         StudioSlider { Layout.fillWidth: true; from: 0; to: 1; value: root.volume; onMoved: root.volumeChangedByUser(value) }
         Text { text: Math.round(root.volume * 100) + "%"; color: "#87979C"; font.pixelSize: 10; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight }
     }

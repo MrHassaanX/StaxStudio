@@ -41,7 +41,7 @@ QVector<CompositorLayer> CompositorScene::activeLayers(const StudioProject &proj
         if (!source || !item.visible) continue;
         const QColor color = placeholderColor(*source);
         if (!color.isValid()) continue;
-        layers.append({item.id, item.transform, {VisualFrameKind::SolidColor, color, project.programResolution.size(), 0}, item.zOrder});
+        layers.append({item.id, item.sourceId, item.transform, {VisualFrameKind::SolidColor, color, project.programResolution.size(), 0}, item.zOrder});
     }
     std::sort(layers.begin(), layers.end(), [](const CompositorLayer &left, const CompositorLayer &right) {
         return left.zOrder < right.zOrder;

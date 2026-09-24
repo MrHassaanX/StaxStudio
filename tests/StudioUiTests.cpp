@@ -33,6 +33,7 @@ class StudioUiTests final : public QObject
     Q_OBJECT
 private slots:
     void visibleRowsAndRepeatedLifecycle();
+    void captureConfigurationUsesMonotonicTimestamps();
 };
 
 void StudioUiTests::visibleRowsAndRepeatedLifecycle()
@@ -171,6 +172,28 @@ void StudioUiTests::visibleRowsAndRepeatedLifecycle()
     QCOMPARE(scenes->rowCount(), 1);
 }
 
+void StudioUiTests::captureConfigurationUsesMonotonicTimestamps()
+{
+    const qint64 first = mediaTimestampNs();
+    QTest::qWait(2);
+    QVERIFY(mediaTimestampNs() > first);
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    StudioController controller(directory.path());
+    controller.addSource("Display Capture", "Configured display");
+    auto *items = controller.sceneItemsModel();
+    QCOMPARE(items->rowCount(), 1);
+    const QString sourceId = role(items, 0, SceneItemListModel::SourceIdRole);
+    const QVariantList displays = controller.captureTargets("Display Capture");
+    if (!displays.isEmpty()) {
+        const QString targetId = displays.first().toMap().value("id").toString();
+        controller.configureCaptureSource(sourceId, targetId, QString{}, false);
+        const QVariantMap configuration = controller.sourceConfiguration(sourceId);
+        QCOMPARE(configuration.value("targetId").toString(), targetId);
+        QCOMPARE(configuration.value("captureCursor").toBool(), false);
+    }
+}
 int main(int argc, char **argv)
 {
     QGuiApplication app(argc, argv);
