@@ -26,6 +26,9 @@ int main(int argc, char *argv[])
 
     AppController appController;
     StudioController studioController;
+    QObject::connect(&appController, &AppController::actionRequested, &studioController, [&studioController](const QString &action) {
+        if (action == QStringLiteral("record")) studioController.toggleRecording();
+    });
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("appController"), &appController);

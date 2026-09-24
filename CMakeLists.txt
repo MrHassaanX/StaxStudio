@@ -20,6 +20,18 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick QuickCont
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
+if(NOT DEFINED STAX_FFMPEG_ROOT AND DEFINED ENV{STAX_FFMPEG_ROOT})
+    set(STAX_FFMPEG_ROOT "$ENV{STAX_FFMPEG_ROOT}" CACHE PATH "FFmpeg shared development package root")
+endif()
+set(STAX_FFMPEG_ROOT "${STAX_FFMPEG_ROOT}" CACHE PATH "FFmpeg shared development package root")
+if(NOT STAX_FFMPEG_ROOT)
+    message(FATAL_ERROR "Set STAX_FFMPEG_ROOT to an FFmpeg shared development package (include/ and lib/ are required).")
+endif()
+find_path(STAX_FFMPEG_INCLUDE_DIR libavcodec/avcodec.h PATHS "${STAX_FFMPEG_ROOT}/include" REQUIRED)
+foreach(component avcodec avformat avutil swresample swscale)
+    find_library(STAX_FFMPEG_${component}_LIBRARY NAMES ${component} lib${component} PATHS "${STAX_FFMPEG_ROOT}/lib" REQUIRED)
+endforeach()
+
 qt_add_executable(StaxStudio
     WIN32
     app/main.cpp
@@ -39,6 +51,10 @@ qt_add_executable(StaxStudio
     core/audio/wasapi/WasapiAudioSource.cpp
     core/audio/wasapi/WasapiAudioSource.h
     core/audio/mixer/MixerChannel.h
+    core/recorder/RecordingTypes.cpp
+    core/recorder/RecordingTypes.h
+    core/recorder/LocalRecorder.cpp
+    core/recorder/LocalRecorder.h
     core/project/StudioProject.cpp
     core/project/StudioProject.h
     core/project/StudioRepository.cpp
@@ -106,6 +122,7 @@ qt_add_qml_module(StaxStudio
 target_include_directories(StaxStudio
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${STAX_FFMPEG_INCLUDE_DIR}
 )
 
 target_link_libraries(StaxStudio
@@ -117,6 +134,11 @@ target_link_libraries(StaxStudio
         Qt6::Quick
         Qt6::QuickControls2
         Qt6::Multimedia
+        ${STAX_FFMPEG_avcodec_LIBRARY}
+        ${STAX_FFMPEG_avformat_LIBRARY}
+        ${STAX_FFMPEG_avutil_LIBRARY}
+        ${STAX_FFMPEG_swresample_LIBRARY}
+        ${STAX_FFMPEG_swscale_LIBRARY}
         ole32
         uuid
 )
@@ -128,6 +150,10 @@ if(WIN32)
             "$<TARGET_FILE:StaxStudio>"
         COMMENT "Deploying Qt runtime dependencies for StaxStudio"
         VERBATIM
+    )
+    add_custom_command(TARGET StaxStudio POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${STAX_FFMPEG_ROOT}/bin" "$<TARGET_FILE_DIR:StaxStudio>"
+        COMMENT "Deploying FFmpeg runtime dependencies for StaxStudio"
     )
 endif()
 
@@ -170,6 +196,10 @@ qt_add_executable(StaxStudioTests
     core/audio/AudioProcessing.cpp
     core/audio/AudioProcessing.h
     core/audio/AudioTypes.h
+    core/recorder/RecordingTypes.cpp
+    core/recorder/RecordingTypes.h
+    core/recorder/LocalRecorder.cpp
+    core/recorder/LocalRecorder.h
     core/audio/AudioInputManager.cpp
     core/audio/AudioInputManager.h
     core/audio/wasapi/WasapiAudioSource.cpp
@@ -179,8 +209,8 @@ qt_add_executable(StaxStudioTests
     ui/controllers/StudioModels.h
 )
 
-target_include_directories(StaxStudioTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test ole32 uuid propsys)
+target_include_directories(StaxStudioTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${STAX_FFMPEG_INCLUDE_DIR})
+target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} ole32 uuid propsys)
 
 if(WIN32)
     add_custom_command(TARGET StaxStudioTests POST_BUILD
@@ -188,6 +218,10 @@ if(WIN32)
             "$<TARGET_FILE:StaxStudioTests>"
         COMMENT "Deploying Qt runtime dependencies for StaxStudio tests"
         VERBATIM
+    )
+    add_custom_command(TARGET StaxStudioTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${STAX_FFMPEG_ROOT}/bin" "$<TARGET_FILE_DIR:StaxStudioTests>"
+        COMMENT "Deploying FFmpeg runtime dependencies for StaxStudio tests"
     )
 endif()
 
@@ -208,6 +242,10 @@ qt_add_executable(StaxStudioUiTests
     core/audio/AudioInputManager.h
     core/audio/wasapi/WasapiAudioSource.cpp
     core/audio/wasapi/WasapiAudioSource.h
+    core/recorder/RecordingTypes.cpp
+    core/recorder/RecordingTypes.h
+    core/recorder/LocalRecorder.cpp
+    core/recorder/LocalRecorder.h
     core/capture/CaptureTypes.cpp
     core/capture/VisualSourceManager.cpp
     core/capture/windows/DxgiDesktopCapture.cpp
@@ -221,9 +259,9 @@ qt_add_executable(StaxStudioUiTests
     ui/controllers/StudioModels.cpp
     ui/render/ProgramPreview.cpp
 )
-target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${STAX_FFMPEG_INCLUDE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Test ole32 uuid propsys)
+target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} ole32 uuid propsys)
 add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
 set_tests_properties(StaxStudioUiTests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"

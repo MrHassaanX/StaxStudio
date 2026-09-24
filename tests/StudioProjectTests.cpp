@@ -2,11 +2,16 @@
 #include "core/audio/AudioProcessing.h"
 #include "core/project/StudioRepository.h"
 #include "core/render/CompositorScene.h"
+#include "core/recorder/LocalRecorder.h"
 #include "ui/controllers/StudioModels.h"
 
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
+
+extern "C" {
+#include <libavformat/avformat.h>
+}
 
 class StudioProjectTests final : public QObject
 {
@@ -25,6 +30,7 @@ private slots:
     void notifiesSourceModelMutations();
     void keepsModelsConsistentThroughRepeatedLifecycleChanges();
     void normalizesAudioBlocks();
+    void writesPlayableMkv();
 };
 
 void StudioProjectTests::createsAndSelectsScenes()
@@ -320,6 +326,36 @@ void StudioProjectTests::normalizesAudioBlocks()
     QVERIFY(AudioProcessing::peakDb(downsampled) < -5.9f && AudioProcessing::peakDb(downsampled) > -6.2f);
     AudioProcessing::applyGainAndMute(downsampled, 1.0f, true);
     QCOMPARE(AudioProcessing::peakDb(downsampled), -90.0f);
+}
+
+void StudioProjectTests::writesPlayableMkv()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    LocalRecorder recorder;
+    RecordingSettings settings;
+    settings.outputDirectory = directory.path();
+    settings.frameRate = 30;
+    QVERIFY(recorder.start(settings, QSize(64, 64)));
+    QTRY_COMPARE(recorder.stateName(), QStringLiteral("Recording"));
+    for (int index = 0; index < 6; ++index) {
+        QImage image(64, 64, QImage::Format_ARGB32);
+        image.fill(index % 2 == 0 ? QColor("#4cba7b") : QColor("#1a3040"));
+        recorder.submitVideoFrame({image, index * 33'333'333LL});
+    }
+    recorder.stop();
+    QCOMPARE(recorder.stateName(), QStringLiteral("Idle"));
+    QVERIFY(QFileInfo::exists(recorder.outputPath()));
+    QVERIFY(QFileInfo(recorder.outputPath()).size() > 1024);
+
+    AVFormatContext *input = nullptr;
+    QCOMPARE(avformat_open_input(&input, recorder.outputPath().toUtf8().constData(), nullptr, nullptr), 0);
+    QCOMPARE(avformat_find_stream_info(input, nullptr), 0);
+    bool hasVideo = false;
+    for (unsigned index = 0; index < input->nb_streams; ++index)
+        hasVideo = hasVideo || input->streams[index]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO;
+    QVERIFY(hasVideo);
+    avformat_close_input(&input);
 }
 QTEST_APPLESS_MAIN(StudioProjectTests)
 

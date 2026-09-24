@@ -208,6 +208,8 @@ Item {
                                         programWidth: studioController.programWidth
                                         programHeight: studioController.programHeight
                                         layers: studioController.compositorLayers
+                                        recorder: studioController.recorder
+                                        recordingActive: studioController.recorder.state === "Recording"
                                     }
                                 }
                                 Text {
@@ -377,9 +379,9 @@ Item {
                         id: controlsLayout
                         anchors.fill: parent
                         spacing: 8
-                        StudioSectionHeader { title: "Controls"; subtitle: "Output is not connected" }
+                        StudioSectionHeader { title: "Controls"; subtitle: studioController.recorder.state === "Recording" ? "Recording locally" : "Streaming is not connected" }
                         StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Start streaming"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
-                        StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Start recording"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
+                        StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: studioController.recorder.state === "Recording" ? "Stop recording" : "Start recording"; enabled: studioController.recorder.state !== "Starting" && studioController.recorder.state !== "Stopping"; onClicked: studioController.toggleRecording(); ToolTip.visible: hovered; ToolTip.text: studioController.recorder.state === "Error" ? studioController.recorder.errorMessage : "Record the program locally as an MKV file." }
                         StudioButton { objectName: "combinedOutputButton"; Layout.fillWidth: true; implicitHeight: 34; text: "Record + stream"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
                     }
                 }

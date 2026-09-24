@@ -4,6 +4,7 @@
 #include "core/audio/AudioInputManager.h"
 #include "core/capture/VisualSourceManager.h"
 #include "core/project/StudioRepository.h"
+#include "core/recorder/LocalRecorder.h"
 
 #include <QObject>
 #include <QVariantList>
@@ -25,6 +26,7 @@ class StudioController final : public QObject
     Q_PROPERTY(int programHeight READ programHeight NOTIFY projectChanged FINAL)
     Q_PROPERTY(QVariantList compositorLayers READ compositorLayers NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged FINAL)
+    Q_PROPERTY(QObject *recorder READ recorder CONSTANT FINAL)
 public:
     explicit StudioController(QObject *parent = nullptr);
     explicit StudioController(const QString &storageDirectory, QObject *parent = nullptr);
@@ -41,6 +43,7 @@ public:
     int programHeight() const;
     QVariantList compositorLayers() const;
     QString statusMessage() const;
+    QObject *recorder();
 
     Q_INVOKABLE void addScene(const QString &name);
     Q_INVOKABLE void renameScene(const QString &sceneId, const QString &name);
@@ -73,6 +76,7 @@ public:
     Q_INVOKABLE void setTransitionDurationMs(int durationMs);
     Q_INVOKABLE void setProfileName(const QString &name);
     Q_INVOKABLE void showUnavailableAction(const QString &action);
+    Q_INVOKABLE void toggleRecording();
 
 signals:
     void projectChanged();
@@ -82,6 +86,7 @@ signals:
 private:
     void refresh();
     void save();
+    void forwardAudio();
     StudioRepository repository_;
     StudioProject project_;
     SceneListModel scenesModel_;
@@ -90,5 +95,8 @@ private:
     MixerListModel mixerModel_;
     VisualSourceManager visualSources_;
     AudioInputManager audioSources_;
+    LocalRecorder recorder_;
+    QTimer audioForwardTimer_;
+    QHash<QString, qint64> submittedAudioTimestamps_;
     QString statusMessage_;
 };

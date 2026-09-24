@@ -41,6 +41,12 @@ QVariantList AudioInputManager::targets(SourceType type) const {
 }
 AudioRuntime AudioInputManager::runtime(const QString &id) const { const auto it = entries_.constFind(id); return it == entries_.cend() ? AudioRuntime{} : it->source->runtime(); }
 float AudioInputManager::levelDb(const QString &id) const { return runtime(id).peakDb; }
+QHash<QString, AudioBlock> AudioInputManager::latestBlocks() const
+{
+    QHash<QString, AudioBlock> blocks;
+    for (auto it = entries_.cbegin(); it != entries_.cend(); ++it) blocks.insert(it.key(), it->source->latestBlock());
+    return blocks;
+}
 void AudioInputManager::setMixControls(const QString &id, const double gain, const bool muted)
 {
     const auto it = entries_.find(id);

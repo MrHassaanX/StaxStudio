@@ -1,11 +1,14 @@
 #include "ProgramPreview.h"
 #include "core/capture/windows/DxgiDesktopCapture.h"
+#include "core/recorder/LocalRecorder.h"
+#include "core/capture/CaptureTypes.h"
 
 #include <QColor>
 #include <QFile>
 #include <QImage>
 #include <QMetaObject>
 #include <QPointer>
+#include <QTimer>
 #include <QVariantMap>
 #include <QtMath>
 
@@ -144,6 +147,7 @@ public:
         preview_ = static_cast<ProgramPreview *>(item);
         programWidth_ = qMax(1, preview_->programWidth());
         programHeight_ = qMax(1, preview_->programHeight());
+        recorder_ = qobject_cast<LocalRecorder *>(preview_->recorder());
         layers_.clear();
         for (const QVariant &entry : preview_->layers()) {
             const QVariantMap values = entry.toMap();
@@ -228,9 +232,32 @@ public:
             for (const Draw &draw : draws) { commandBuffer->setShaderResources(draw.bindings); commandBuffer->draw(draw.count, 1, draw.offset); }
         }
         commandBuffer->endPass();
+        queueRecordingReadback(commandBuffer);
     }
 
 private:
+    void queueRecordingReadback(QRhiCommandBuffer *commandBuffer)
+    {
+        if (!recorder_ || recorder_->state() != RecordingState::Recording || readbackPending_) return;
+        const auto *target = static_cast<const QRhiTextureRenderTarget *>(renderTarget());
+        const QRhiColorAttachment *attachment = target->description().colorAttachmentAt(0);
+        if (!attachment || !attachment->texture()) return;
+        readbackPending_ = true;
+        auto *result = new QRhiReadbackResult;
+        const QPointer<LocalRecorder> recorder(recorder_);
+        const qint64 timestamp = mediaTimestampNs();
+        result->completed = [result, recorder, timestamp, this] {
+            if (recorder && result->pixelSize.isValid() && !result->data.isEmpty()) {
+                QImage image(reinterpret_cast<const uchar *>(result->data.constData()), result->pixelSize.width(), result->pixelSize.height(), QImage::Format_RGBA8888);
+                recorder->submitVideoFrame({image.copy(), timestamp});
+            }
+            readbackPending_ = false;
+            delete result;
+        };
+        QRhiResourceUpdateBatch *updates = rhi()->nextResourceUpdateBatch();
+        updates->readBackTexture(QRhiReadbackDescription(attachment->texture()), result);
+        commandBuffer->resourceUpdate(updates);
+    }
     void publishState(const QString &state)
     {
         const QPointer<ProgramPreview> preview(preview_);
@@ -333,6 +360,8 @@ private:
     }
 
     ProgramPreview *preview_ = nullptr;
+    QPointer<LocalRecorder> recorder_;
+    bool readbackPending_ = false;
     QVector<PreviewLayer> layers_;
     int programWidth_ = 1920;
     int programHeight_ = 1080;
@@ -353,6 +382,8 @@ ProgramPreview::ProgramPreview(QQuickItem *parent) : QQuickRhiItem(parent)
     setAlphaBlending(false);
     setFixedColorBufferWidth(programWidth_);
     setFixedColorBufferHeight(programHeight_);
+    recordingTimer_.setInterval(16);
+    connect(&recordingTimer_, &QTimer::timeout, this, &ProgramPreview::update);
 }
 
 QVariantList ProgramPreview::layers() const { return layers_; }
@@ -382,6 +413,24 @@ void ProgramPreview::setProgramHeight(int height)
     update();
 }
 QString ProgramPreview::rendererState() const { return rendererState_; }
+QObject *ProgramPreview::recorder() const { return recorder_; }
+void ProgramPreview::setRecorder(QObject *recorder)
+{
+    const auto value = qobject_cast<LocalRecorder *>(recorder);
+    if (recorder_ == value) return;
+    recorder_ = value;
+    emit recorderChanged();
+    update();
+}
+bool ProgramPreview::recordingActive() const { return recordingActive_; }
+void ProgramPreview::setRecordingActive(const bool active)
+{
+    if (recordingActive_ == active) return;
+    recordingActive_ = active;
+    if (active) recordingTimer_.start(); else recordingTimer_.stop();
+    emit recordingActiveChanged();
+    update();
+}
 void ProgramPreview::publishRendererState(const QString &state)
 {
     if (rendererState_ == state) return;

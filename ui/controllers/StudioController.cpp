@@ -20,7 +20,7 @@ StudioController::StudioController(QObject *parent)
 
 StudioController::StudioController(const QString &storageDirectory, QObject *parent)
     : QObject(parent), repository_(storageDirectory), project_(repository_.load()), scenesModel_(&project_, this),
-      sceneItemsModel_(&project_, &selectedItemId_, this), mixerModel_(&project_, this), visualSources_(this), audioSources_(this),
+      sceneItemsModel_(&project_, &selectedItemId_, this), mixerModel_(&project_, this), visualSources_(this), audioSources_(this), recorder_(this),
       statusMessage_(QStringLiteral("Studio setup is saved locally. Media capture is not connected yet."))
 {
     connect(&visualSources_, &VisualSourceManager::framesChanged, this, [this] { emit projectChanged(); });
@@ -29,6 +29,18 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
     visualSources_.synchronizeSources(project_.sources);
     audioSources_.synchronizeSources(project_.sources);
     for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
+    audioForwardTimer_.setInterval(20);
+    connect(&audioForwardTimer_, &QTimer::timeout, this, &StudioController::forwardAudio);
+    audioForwardTimer_.start();
+    connect(&recorder_, &LocalRecorder::stateChanged, this, [this] {
+        const QString state = recorder_.stateName();
+        statusMessage_ = recorder_.state() == RecordingState::Error
+            ? QStringLiteral("Recording error: %1").arg(recorder_.errorMessage())
+            : state == QStringLiteral("Recording") ? QStringLiteral("Recording to %1").arg(recorder_.outputPath())
+            : QStringLiteral("Recorder %1").arg(state.toLower());
+        emit statusMessageChanged();
+        emit projectChanged();
+    });
 }
 
 QAbstractItemModel *StudioController::scenesModel() { return &scenesModel_; }
@@ -62,6 +74,7 @@ QVariantList StudioController::compositorLayers() const
     return values;
 }
 QString StudioController::statusMessage() const { return statusMessage_; }
+QObject *StudioController::recorder() { return &recorder_; }
 
 void StudioController::addScene(const QString &name)
 {
@@ -218,6 +231,50 @@ void StudioController::setTransitionType(const QString &type) { project_.transit
 void StudioController::setTransitionDurationMs(int value) { project_.transition.durationMs = qBound(50, value, 10000); refresh(); }
 void StudioController::setProfileName(const QString &name) { const QString trimmed = name.trimmed(); if (!trimmed.isEmpty()) { project_.profileName = trimmed; refresh(); } }
 void StudioController::showUnavailableAction(const QString &action) { statusMessage_ = QStringLiteral("%1 is planned for the media milestone. Your studio configuration is safe.").arg(action); emit statusMessageChanged(); }
+void StudioController::toggleRecording()
+{
+    if (recorder_.state() == RecordingState::Recording || recorder_.state() == RecordingState::Starting || recorder_.state() == RecordingState::Stopping) {
+        recorder_.stop();
+        return;
+    }
+    RecordingSettings settings;
+    if (!recorder_.start(settings, {project_.programResolution.width, project_.programResolution.height})) {
+        statusMessage_ = QStringLiteral("Unable to start the recorder.");
+        emit statusMessageChanged();
+    }
+}
+
+void StudioController::forwardAudio()
+{
+    if (recorder_.state() != RecordingState::Recording) return;
+    const auto blocks = audioSources_.latestBlocks();
+    QVector<AudioBlock> pending;
+    for (auto it = blocks.cbegin(); it != blocks.cend(); ++it) {
+        const AudioBlock &block = it.value();
+        if (block.timestampNs <= submittedAudioTimestamps_.value(it.key()) || block.samples.isEmpty()) continue;
+        submittedAudioTimestamps_.insert(it.key(), block.timestampNs);
+        pending.append(block);
+    }
+    if (pending.isEmpty()) return;
+
+    // Each runtime source already applies its channel gain/mute. Collapse the
+    // current capture callbacks into the recorder's single stereo program mix.
+    int frames = 0;
+    qint64 timestamp = pending.first().timestampNs;
+    for (const AudioBlock &block : pending) {
+        frames = qMax(frames, block.samples.size() / qMax(1, block.channelCount));
+        timestamp = qMin(timestamp, block.timestampNs);
+    }
+    AudioBlock mixed{timestamp, 48000, 2, QVector<float>(frames * 2)};
+    for (const AudioBlock &block : pending) {
+        const int sourceFrames = block.samples.size() / qMax(1, block.channelCount);
+        for (int frame = 0; frame < sourceFrames; ++frame) {
+            mixed.samples[frame * 2] += block.samples[frame * block.channelCount];
+            mixed.samples[frame * 2 + 1] += block.samples[frame * block.channelCount + qMin(1, block.channelCount - 1)];
+        }
+    }
+    recorder_.submitAudioBlock(std::move(mixed));
+}
 
 void StudioController::refresh()
 {

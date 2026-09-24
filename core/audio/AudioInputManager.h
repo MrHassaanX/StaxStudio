@@ -14,6 +14,7 @@ public:
     QVariantList targets(SourceType type) const;
     AudioRuntime runtime(const QString &sourceId) const;
     float levelDb(const QString &sourceId) const;
+    QHash<QString, AudioBlock> latestBlocks() const;
     void setMixControls(const QString &sourceId, double gain, bool muted);
 signals:
     void metersChanged();
