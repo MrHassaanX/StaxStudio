@@ -57,7 +57,7 @@ static AudioBlock convert(AudioBlock block, AudioResampleState *state,
 AudioBlock normalizeToInternalFormat(AudioBlock block, AudioResampleState *state)
 {
     if(block.sampleRate==InternalSampleRate) { if(state) *state={}; return block; }
-    const int frames=block.channelCount>0 ? block.samples.size()/block.channelCount : 0;
+    const int frames = block.frameCount();
     const auto *input=reinterpret_cast<const uint8_t *>(block.samples.constData());
     return convert(std::move(block),state,input,frames,AV_SAMPLE_FMT_FLT);
 }
@@ -107,13 +107,13 @@ AudioBlock mixToStereo(const QVector<AudioBlock> &blocks)
     qint64 timestampNs = 0;
     for (const AudioBlock &block : blocks) {
         if (block.samples.isEmpty() || block.channelCount <= 0) continue;
-        frames = qMax(frames, block.samples.size() / block.channelCount);
+        frames = qMax(frames, block.frameCount());
         if (timestampNs == 0 || block.timestampNs < timestampNs) timestampNs = block.timestampNs;
     }
     AudioBlock mixed{timestampNs, InternalSampleRate, 2, QVector<float>(frames * 2)};
     for (const AudioBlock &block : blocks) {
         if (block.channelCount <= 0) continue;
-        const int sourceFrames = block.samples.size() / block.channelCount;
+        const int sourceFrames = block.frameCount();
         for (int frame = 0; frame < sourceFrames; ++frame) {
             mixed.samples[frame * 2] += block.samples[frame * block.channelCount];
             mixed.samples[frame * 2 + 1] += block.samples[frame * block.channelCount + qMin(1, block.channelCount - 1)];

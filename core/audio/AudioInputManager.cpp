@@ -136,6 +136,6 @@ void AudioInputManager::drainToSink(const std::function<void(AudioBlock)> &sink)
         QVector<AudioBlock> sources;
         for (const QVector<AudioBlock> &blocks : perSource) if (batch < blocks.size()) sources.append(blocks.at(batch));
         AudioBlock mixed = AudioProcessing::mixToStereo(sources);
-        if (!mixed.samples.isEmpty()) sink(std::move(mixed));
+        if (mixed.isValid()) sink(std::move(mixed));
     }
 }

@@ -143,7 +143,10 @@ void LocalRecorder::submitVideoFrame(RecordedVideoFrame frame)
 
 void LocalRecorder::submitAudioBlock(AudioBlock block)
 {
-    if (block.samples.isEmpty()) return;
+    // Reject malformed interleaved data at the recording boundary. In
+    // particular, a stereo sample count must be an even number; treating it
+    // as a frame count would double the AAC timeline.
+    if (!block.isValid()) return;
     QMutexLocker lock(&mutex_);
     if (state_ != RecordingState::Recording) return;
     ++submittedAudioBlocks_;
@@ -263,7 +266,7 @@ void LocalRecorder::run(RecordingSettings settings, const QSize size)
     qint64 originNs = -1, nextVideoPts = 0, nextAudioPts = 0;
     const auto encodeAudioBlock = [&](const AudioBlock &audioBlock) {
         if (!audio || audioBlock.samples.isEmpty()) return;
-        const int inFrames = audioBlock.samples.size() / qMax(1, audioBlock.channelCount);
+        const int inFrames = audioBlock.frameCount();
         if (inFrames <= 0) return;
         QVector<float> left(inFrames), right(inFrames);
         for (int frame = 0; frame < inFrames; ++frame) {

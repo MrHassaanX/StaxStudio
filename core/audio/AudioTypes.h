@@ -12,6 +12,19 @@ struct AudioBlock final {
     int channelCount = 0;
     QVector<float> samples;
     quint64 channelMask = 0;
+
+    // samples is interleaved. Duration is always frameCount() / sampleRate,
+    // never samples.size() / sampleRate for a multichannel block.
+    [[nodiscard]] int frameCount() const
+    {
+        return channelCount > 0 && samples.size() % channelCount == 0
+            ? samples.size() / channelCount : 0;
+    }
+
+    [[nodiscard]] bool isValid() const
+    {
+        return sampleRate > 0 && channelCount > 0 && frameCount() > 0;
+    }
 };
 
 // Kept by a capture source so packet-by-packet rate conversion cannot drift

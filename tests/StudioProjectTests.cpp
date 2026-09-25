@@ -734,6 +734,9 @@ void StudioProjectTests::writesCompleteSixtySecondMkvWithoutPreview()
                              .arg(videoPackets).arg(videoSeconds, 0, 'f', 3).arg(audioSeconds, 0, 'f', 3);
     QVERIFY2(qAbs(videoSeconds - 60.0) < 0.05, qPrintable(QStringLiteral("Video ended at %1 s").arg(videoSeconds)));
     QVERIFY2(qAbs(audioSeconds - 60.0) < 0.1, qPrintable(QStringLiteral("Audio ended at %1 s").arg(audioSeconds)));
+    QVERIFY2(qAbs(audioSeconds - videoSeconds) < 0.1,
+             qPrintable(QStringLiteral("A/V duration mismatch: video %1 s, audio %2 s")
+                 .arg(videoSeconds, 0, 'f', 3).arg(audioSeconds, 0, 'f', 3)));
     av_packet_free(&packet);
     avformat_close_input(&input);
 }

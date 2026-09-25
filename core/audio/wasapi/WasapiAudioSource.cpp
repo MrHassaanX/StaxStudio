@@ -80,6 +80,7 @@ void WasapiAudioSource::run()
                 runtime_={CaptureState::Error,QString::fromUtf8(error.what()),-90}; running_=false; break;
             }
             capture->ReleaseBuffer(frames);
+            if (!block.isValid()) continue;
             AudioProcessing::applyGainAndMute(block, gain_.load(), muted_);
             {
                 QMutexLocker lock(&mutex_);
