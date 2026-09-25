@@ -1,7 +1,9 @@
 #include "StudioController.h"
 
 #include "core/render/CompositorScene.h"
+#include "core/render/ProgramFrameMath.h"
 #include <algorithm>
+#include <QJsonDocument>
 
 namespace {
 QVariantMap transformValues(const Transform &value)
@@ -23,24 +25,49 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
       sceneItemsModel_(&project_, &selectedItemId_, this), mixerModel_(&project_, this), visualSources_(this), audioSources_(this), recorder_(this),
       statusMessage_(QStringLiteral("Studio setup is saved locally. Media capture is not connected yet."))
 {
-    connect(&visualSources_, &VisualSourceManager::framesChanged, this, [this] { emit projectChanged(); });
+    dockLayout_ = new DockLayout(storageDirectory, this);
+    connect(&visualSources_, &VisualSourceManager::framesChanged, this, [this] {
+        for (const Source &source : project_.sources) {
+            const CapturedVideoFrame frame = visualSources_.frame(source.id);
+            if (!frame.image.isNull()) programEngine_.updateSourceFrame(source.id, frame.image, frame.timestampNs);
+        }
+    });
     connect(&visualSources_, &VisualSourceManager::sourceStateChanged, this, [this](const QString &) { emit projectChanged(); });
     connect(&audioSources_, &AudioInputManager::metersChanged, this, [this] { for (const MixerChannel &channel : project_.mixerChannels) mixerModel_.setLevel(channel.id, audioSources_.levelDb(channel.id)); });
     visualSources_.synchronizeSources(project_.sources);
+    programEngine_.setRecorder(&recorder_);
+    programEngine_.setScene(compositorLayers(), project_.programResolution.size());
     audioSources_.synchronizeSources(project_.sources);
     for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
-    audioForwardTimer_.setInterval(20);
-    connect(&audioForwardTimer_, &QTimer::timeout, this, &StudioController::forwardAudio);
-    audioForwardTimer_.start();
     connect(&recorder_, &LocalRecorder::stateChanged, this, [this] {
         const QString state = recorder_.stateName();
         statusMessage_ = recorder_.state() == RecordingState::Error
             ? QStringLiteral("Recording error: %1").arg(recorder_.errorMessage())
             : state == QStringLiteral("Recording") ? QStringLiteral("Recording to %1").arg(recorder_.outputPath())
             : QStringLiteral("Recorder %1").arg(state.toLower());
+        if (recorder_.state() == RecordingState::Recording) {
+            audioSources_.setRecordingSink([this](AudioBlock block) { recorder_.submitAudioBlock(std::move(block)); });
+        } else {
+            audioSources_.setRecordingSink({});
+        }
         emit statusMessageChanged();
         emit projectChanged();
     });
+}
+
+QRectF StudioController::previewCanvasRect(double width, double height, double inset) const
+{
+    auto rect=ProgramFrameMath::bestFitPreviewRect(project_.programResolution.size(),
+        QSizeF(qMax(0.0,width-2*inset),qMax(0.0,height-2*inset)));
+    rect.translate(inset,inset);
+    return rect;
+}
+
+StudioController::~StudioController()
+{
+    // The recording sink is invoked on AudioInputManager's worker, so clear it
+    // before LocalRecorder is destroyed (member destruction is reverse order).
+    audioSources_.setRecordingSink({});
 }
 
 QAbstractItemModel *StudioController::scenesModel() { return &scenesModel_; }
@@ -60,7 +87,7 @@ QVariantList StudioController::compositorLayers() const
     for (const CompositorLayer &layer : CompositorScene::activeLayers(project_)) {
         const CapturedVideoFrame captured = visualSources_.frame(layer.sourceId);
         const Source *source = project_.source(layer.sourceId);
-        values.append(QVariantMap{{"itemId", layer.sceneItemId}, {"x", layer.transform.x}, {"y", layer.transform.y},
+        values.append(QVariantMap{{"itemId", layer.sceneItemId}, {"sourceId", layer.sourceId}, {"x", layer.transform.x}, {"y", layer.transform.y},
                                   {"width", layer.transform.width}, {"height", layer.transform.height},
                                   {"scaleX", layer.transform.scaleX}, {"scaleY", layer.transform.scaleY},
                                   {"rotation", layer.transform.rotation}, {"cropLeft", layer.transform.cropLeft},
@@ -75,6 +102,7 @@ QVariantList StudioController::compositorLayers() const
 }
 QString StudioController::statusMessage() const { return statusMessage_; }
 QObject *StudioController::recorder() { return &recorder_; }
+QObject *StudioController::programEngine() { return &programEngine_; }
 
 void StudioController::addScene(const QString &name)
 {
@@ -114,11 +142,23 @@ void StudioController::addSource(const QString &typeName, const QString &name)
     bool ok = false;
     const SourceType type = sourceTypeFromName(typeName, &ok);
     if (!ok) return;
-    sceneItemsModel_.addSource(type, name);
+    const QString itemId = sceneItemsModel_.addSource(type, name);
     Scene *scene = project_.activeScene();
     Source *source = scene && !scene->items.isEmpty() ? project_.source(scene->items.last().sourceId) : nullptr;
-    if (source && (type == SourceType::DisplayCapture || type == SourceType::WindowCapture || type == SourceType::GameCapture || type == SourceType::Webcam))
+    if (source && (type == SourceType::DisplayCapture || type == SourceType::WindowCapture || type == SourceType::GameCapture || type == SourceType::Webcam)) {
         source->configuration.insert(QStringLiteral("targetId"), visualSources_.defaultTarget(type));
+        QSize sourceSize;
+        for (const QVariant &target : visualSources_.targets(type)) {
+            const QVariantMap values = target.toMap();
+            if (values.value("id").toString() == source->configuration.value("targetId").toString()) {
+                sourceSize = {values.value("width").toInt(), values.value("height").toInt()};
+                break;
+            }
+        }
+        if (sourceSize.isValid()) {
+            sceneItemsModel_.setItemTransform(itemId, ProgramFrameMath::fitToCanvas(sourceSize, project_.programResolution.size()));
+        }
+    }
     refresh();
 }
 QVariantList StudioController::captureTargets(const QString &typeName) const
@@ -215,7 +255,7 @@ void StudioController::previewItemTransform(const QString &itemId, const QVarian
     value.cropBottom = values.value("cropBottom", existing.value("cropBottom")).toDouble();
     value.flipHorizontal = values.value("flipHorizontal", existing.value("flipHorizontal")).toBool();
     value.flipVertical = values.value("flipVertical", existing.value("flipVertical")).toBool();
-    if (sceneItemsModel_.setItemTransform(itemId, value)) emit projectChanged();
+    if (sceneItemsModel_.setItemTransform(itemId, value)) programEngine_.updateTransform(itemId, transformValues(value));
 }
 void StudioController::commitPreviewTransform() { save(); emit projectChanged(); }
 void StudioController::applyTransformAction(const QString &itemId, const QString &action) { if (sceneItemsModel_.applyTransformAction(itemId, action)) refresh(); }
@@ -234,46 +274,19 @@ void StudioController::showUnavailableAction(const QString &action) { statusMess
 void StudioController::toggleRecording()
 {
     if (recorder_.state() == RecordingState::Recording || recorder_.state() == RecordingState::Starting || recorder_.state() == RecordingState::Stopping) {
+        audioSources_.flushRecordingSink();
+        audioSources_.setRecordingSink({});
+        recorder_.setProgramDiagnostics(programEngine_.diagnostics());
         recorder_.stop();
         return;
     }
     RecordingSettings settings;
+    audioSources_.discardPendingBlocks();
+    audioSources_.setRecordingSink({});
     if (!recorder_.start(settings, {project_.programResolution.width, project_.programResolution.height})) {
         statusMessage_ = QStringLiteral("Unable to start the recorder.");
         emit statusMessageChanged();
     }
-}
-
-void StudioController::forwardAudio()
-{
-    if (recorder_.state() != RecordingState::Recording) return;
-    const auto blocks = audioSources_.latestBlocks();
-    QVector<AudioBlock> pending;
-    for (auto it = blocks.cbegin(); it != blocks.cend(); ++it) {
-        const AudioBlock &block = it.value();
-        if (block.timestampNs <= submittedAudioTimestamps_.value(it.key()) || block.samples.isEmpty()) continue;
-        submittedAudioTimestamps_.insert(it.key(), block.timestampNs);
-        pending.append(block);
-    }
-    if (pending.isEmpty()) return;
-
-    // Each runtime source already applies its channel gain/mute. Collapse the
-    // current capture callbacks into the recorder's single stereo program mix.
-    int frames = 0;
-    qint64 timestamp = pending.first().timestampNs;
-    for (const AudioBlock &block : pending) {
-        frames = qMax(frames, block.samples.size() / qMax(1, block.channelCount));
-        timestamp = qMin(timestamp, block.timestampNs);
-    }
-    AudioBlock mixed{timestamp, 48000, 2, QVector<float>(frames * 2)};
-    for (const AudioBlock &block : pending) {
-        const int sourceFrames = block.samples.size() / qMax(1, block.channelCount);
-        for (int frame = 0; frame < sourceFrames; ++frame) {
-            mixed.samples[frame * 2] += block.samples[frame * block.channelCount];
-            mixed.samples[frame * 2 + 1] += block.samples[frame * block.channelCount + qMin(1, block.channelCount - 1)];
-        }
-    }
-    recorder_.submitAudioBlock(std::move(mixed));
 }
 
 void StudioController::refresh()
@@ -282,6 +295,7 @@ void StudioController::refresh()
     audioSources_.synchronizeSources(project_.sources);
     for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
     mixerModel_.synchronize();
+    programEngine_.setScene(compositorLayers(), project_.programResolution.size());
     save();
     emit projectChanged();
 }

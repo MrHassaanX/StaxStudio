@@ -8,11 +8,13 @@
 #include <QMediaCaptureSession>
 #include <QPixmap>
 #include <QScreen>
+#include <QScopeGuard>
 #include <QVideoFrame>
 #include <QVideoSink>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include <dxgi1_2.h>
 #endif
 
 namespace {
@@ -22,6 +24,32 @@ QString cameraId(const QCameraDevice &device)
 }
 
 #ifdef Q_OS_WIN
+QVariantList nativeDisplayTargets()
+{
+    QVariantList result;
+    IDXGIFactory1 *factory = nullptr;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) return result;
+    auto cleanup = qScopeGuard([&] { factory->Release(); });
+    for (UINT adapterIndex = 0;; ++adapterIndex) {
+        IDXGIAdapter1 *adapter = nullptr;
+        if (factory->EnumAdapters1(adapterIndex, &adapter) == DXGI_ERROR_NOT_FOUND) break;
+        auto adapterCleanup = qScopeGuard([&] { adapter->Release(); });
+        for (UINT outputIndex = 0;; ++outputIndex) {
+            IDXGIOutput *output = nullptr;
+            if (adapter->EnumOutputs(outputIndex, &output) == DXGI_ERROR_NOT_FOUND) break;
+            auto outputCleanup = qScopeGuard([&] { output->Release(); });
+            DXGI_OUTPUT_DESC description{};
+            if (FAILED(output->GetDesc(&description)) || !description.AttachedToDesktop) continue;
+            const RECT rect = description.DesktopCoordinates;
+            const QSize nativeSize(rect.right - rect.left, rect.bottom - rect.top);
+            const QString name = QString::fromWCharArray(description.DeviceName);
+            result.append(CaptureTarget{name, name, nativeSize, rect.left == 0 && rect.top == 0,
+                                        QStringLiteral("%1 x %2 native pixels").arg(nativeSize.width()).arg(nativeSize.height())}.toVariantMap());
+        }
+    }
+    return result;
+}
+
 struct WindowEntry final {
     QString id;
     QString title;
@@ -44,7 +72,13 @@ BOOL CALLBACK collectWindow(HWND window, LPARAM parameter)
 
 VisualSourceManager::VisualSourceManager(QObject *parent) : QObject(parent)
 {
+#ifdef Q_OS_WIN
+    // Native pixels are acquired on ProgramRenderEngine's output clock; this
+    // timer checks only device/window availability for the UI.
+    timer_.setInterval(500);
+#else
     timer_.setInterval(33);
+#endif
     connect(&timer_, &QTimer::timeout, this, &VisualSourceManager::captureDesktopFrames);
 }
 
@@ -69,6 +103,10 @@ void VisualSourceManager::synchronizeSources(const QVector<Source> &sources)
     }
     for (const QString &id : camerasToStop) stopCamera(id);
     sources_ = std::move(next);
+    for (auto it = frames_.begin(); it != frames_.end();) {
+        if (!sources_.contains(it.key())) it = frames_.erase(it);
+        else ++it;
+    }
     for (const Source &source : sources_) if (source.type == SourceType::Webcam) startCamera(source);
     if (!timer_.isActive() && !sources_.isEmpty()) timer_.start();
     if (sources_.isEmpty()) timer_.stop();
@@ -83,11 +121,15 @@ QVariantList VisualSourceManager::targets(const SourceType type) const
 {
     QVariantList result;
     if (type == SourceType::DisplayCapture) {
+#ifdef Q_OS_WIN
+        return nativeDisplayTargets();
+#else
         const auto screens = QGuiApplication::screens();
         for (QScreen *screen : screens) {
             const QSize size = screen->size();
             result.append(CaptureTarget{screen->name(), screen->name(), size, screen == QGuiApplication::primaryScreen(), QStringLiteral("%1 x %2").arg(size.width()).arg(size.height())}.toVariantMap());
         }
+#endif
     } else if (type == SourceType::WindowCapture || type == SourceType::GameCapture) {
 #ifdef Q_OS_WIN
         QVector<WindowEntry> windows;
@@ -125,7 +167,7 @@ void VisualSourceManager::updateFrame(const QString &sourceId, CapturedVideoFram
     const CapturedVideoFrame old = frames_.value(sourceId);
     const bool stateChanged = old.state != frame.state || old.message != frame.message;
     frames_.insert(sourceId, std::move(frame));
-    emit framesChanged();
+    if (!frames_[sourceId].image.isNull() || stateChanged) emit framesChanged();
     if (stateChanged) emit sourceStateChanged(sourceId);
 }
 
@@ -148,9 +190,11 @@ void VisualSourceManager::captureDesktopSource(const Source &source)
     // Display/window pixels are acquired by the D3D11 compositor through DXGI
     // Desktop Duplication. Keep this manager limited to lifecycle/state work.
     if (source.type == SourceType::DisplayCapture) {
-        for (QScreen *screen : QGuiApplication::screens()) {
-            if (screen->name() == target) {
-                updateFrame(source.id, {{}, screen->size(), mediaTimestampNs(), CaptureState::Active, {}});
+        for (const QVariant &entry : nativeDisplayTargets()) {
+            const QVariantMap display = entry.toMap();
+            if (display.value("id").toString() == target) {
+                const QSize nativePixels(display.value("width").toInt(), display.value("height").toInt());
+                updateFrame(source.id, {{}, nativePixels, mediaTimestampNs(), CaptureState::Active, {}});
                 return;
             }
         }

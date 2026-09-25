@@ -5,6 +5,6 @@
 struct MixerChannel final {
     QString id;
     QString name;
-    double volume = 0.8;
+    double volume = 1.0;
     bool muted = false;
 };

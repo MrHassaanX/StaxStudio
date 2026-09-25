@@ -61,6 +61,10 @@ qt_add_executable(StaxStudio
     core/project/StudioRepository.h
     core/render/CompositorScene.cpp
     core/render/CompositorScene.h
+    core/render/ProgramFrameMath.cpp
+    core/render/ProgramFrameMath.h
+    core/render/ProgramRenderEngine.cpp
+    core/render/ProgramRenderEngine.h
     core/render/ProgramResolution.cpp
     core/render/ProgramResolution.h
     core/render/VisualSourceFrame.h
@@ -117,6 +121,8 @@ qt_add_qml_module(StaxStudio
         ui/qml/components/StudioSlider.qml
         ui/qml/components/StudioTextField.qml
         ui/qml/components/TransformDialog.qml
+        ui/qml/components/DockPanel.qml
+        ui/qml/components/DockWorkspace.qml
 )
 
 target_include_directories(StaxStudio
@@ -170,6 +176,7 @@ install(TARGETS StaxStudio
 )
 
 enable_testing()
+target_link_libraries(StaxStudio PRIVATE d3d11 dxgi d3dcompiler)
 
 qt_add_executable(StaxStudioTests
     tests/StudioProjectTests.cpp
@@ -184,6 +191,8 @@ qt_add_executable(StaxStudioTests
     core/project/StudioRepository.h
     core/render/CompositorScene.cpp
     core/render/CompositorScene.h
+    core/render/ProgramFrameMath.cpp
+    core/render/ProgramFrameMath.h
     core/render/ProgramResolution.cpp
     core/render/ProgramResolution.h
     core/render/VisualSourceFrame.h
@@ -252,6 +261,10 @@ qt_add_executable(StaxStudioUiTests
     core/project/StudioProject.cpp
     core/project/StudioRepository.cpp
     core/render/CompositorScene.cpp
+    core/render/ProgramFrameMath.cpp
+    core/render/ProgramFrameMath.h
+    core/render/ProgramRenderEngine.cpp
+    core/render/ProgramRenderEngine.h
     core/render/ProgramResolution.cpp
     core/source/Source.cpp
     ui/controllers/AppController.cpp
@@ -259,11 +272,19 @@ qt_add_executable(StaxStudioUiTests
     ui/controllers/StudioModels.cpp
     ui/render/ProgramPreview.cpp
 )
+qt_add_shaders(StaxStudioUiTests "StaxUiTestCompositorShaders"
+    PREFIX "/stax/shaders"
+    FILES core/render/shaders/compositor.vert core/render/shaders/compositor.frag
+)
 target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${STAX_FFMPEG_INCLUDE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} ole32 uuid propsys)
+target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} d3d11 dxgi dxguid ole32 uuid propsys)
 add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
+target_link_libraries(StaxStudioUiTests PRIVATE d3dcompiler)
+foreach(target StaxStudio StaxStudioTests StaxStudioUiTests)
+    target_sources(${target} PRIVATE ui/controllers/DockLayout.cpp ui/controllers/DockLayout.h)
+endforeach()
 set_tests_properties(StaxStudioUiTests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"
-    TIMEOUT 60
+    TIMEOUT 150
 )

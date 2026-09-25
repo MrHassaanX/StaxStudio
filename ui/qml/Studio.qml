@@ -19,13 +19,45 @@ Item {
     property var propertyTargets: []
     property var propertyFormats: []
     property var propertyConfiguration: ({})
+    property string pendingPreviewTransformItemId: ""
+    property var pendingPreviewTransform: ({})
+    function formatElapsed(ms) {
+        const seconds = Math.floor(ms / 1000)
+        const hours = Math.floor(seconds / 3600)
+        const minutes = Math.floor((seconds % 3600) / 60)
+        const remainder = seconds % 60
+        return (hours < 10 ? "0" : "") + hours + ":" + (minutes < 10 ? "0" : "") + minutes + ":" + (remainder < 10 ? "0" : "") + remainder
+    }
+    function queuePreviewTransform(itemId, transform) {
+        pendingPreviewTransformItemId = itemId
+        pendingPreviewTransform = transform
+        previewTransformTimer.restart()
+    }
+    function commitQueuedPreviewTransform() {
+        if (previewTransformTimer.running) {
+            previewTransformTimer.stop()
+            studioController.previewItemTransform(pendingPreviewTransformItemId, pendingPreviewTransform)
+        }
+        pendingPreviewTransformItemId = ""
+        pendingPreviewTransform = ({})
+        studioController.commitPreviewTransform()
+    }
+
+    // Mouse movement can arrive much faster than display refresh. Coalescing
+    // keeps the compositor responsive while persistence remains release-only.
+    Timer {
+        id: previewTransformTimer
+        interval: 16
+        repeat: false
+        onTriggered: studioController.previewItemTransform(root.pendingPreviewTransformItemId, root.pendingPreviewTransform)
+    }
 
     Rectangle { anchors.fill: parent; color: "#0F171A" }
 
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 16
-        spacing: 12
+        spacing: 10
 
         RowLayout {
             Layout.fillWidth: true
@@ -48,6 +80,26 @@ Item {
                     Text { anchors.verticalCenter: parent.verticalCenter; width: parent.width - 70; text: studioController.profileName; color: "#DCE7E8"; font.pixelSize: 12; elide: Text.ElideRight }
                 }
             }
+            IconButton {
+                iconName: "settings"; tooltip: "Workspace layout"
+                onClicked: layoutMenu.popup()
+                StudioMenu {
+                    id: layoutMenu
+                    StudioMenuItem { text: "Reset Layout"; onTriggered: studioController.dockLayout.reset() }
+                    StudioMenuItem { text: studioController.dockLayout.locked ? "Unlock Layout" : "Lock Layout"; onTriggered: studioController.dockLayout.locked = !studioController.dockLayout.locked }
+                    MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: "#31454B" } }
+                    Repeater {
+                        model: [{key:"scenes",label:"Scenes"},{key:"sources",label:"Sources"},{key:"mixer",label:"Audio Mixer"},{key:"transition",label:"Transitions"},{key:"controls",label:"Controls"}]
+                        delegate: StudioMenuItem {
+                            required property var modelData
+                            readonly property bool panelHidden: studioController.dockLayout.hiddenPanels.indexOf(modelData.key)>=0
+                            text: (panelHidden ? "Show " : "Hide ") + modelData.label
+                            enabled: !studioController.dockLayout.locked
+                            onTriggered: studioController.dockLayout.setPanelVisible(modelData.key,panelHidden)
+                        }
+                    }
+                }
+            }
             Rectangle {
                 Layout.preferredWidth: 164
                 Layout.preferredHeight: 38
@@ -64,25 +116,28 @@ Item {
             }
         }
 
-        RowLayout {
+        ScrollView {
+            id: workspaceScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 12
-
-            ColumnLayout {
-                Layout.preferredWidth: 222
-                Layout.minimumWidth: 200
-                Layout.fillHeight: true
-                spacing: 12
-                StudioPanel {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.minimumHeight: 220
+            clip: true
+            contentWidth: Math.max(availableWidth, workspace.minimumLayout.minimumWidth)
+            contentHeight: Math.max(availableHeight, workspace.minimumLayout.minimumHeight)
+            DockWorkspace {
+                id: workspace
+                objectName: "studioWorkspace"
+                width: workspaceScroll.contentWidth
+                height: workspaceScroll.contentHeight
+                manager: studioController.dockLayout
+                DockPanel {
+                    id: scenesPanel
+                    dockId: "scenes"; dockTitle: "Scenes"; workspace: workspace
+                    objectName: "scenesPanel"
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 10
                         StudioSectionHeader {
-                            title: "Scenes"; subtitle: "Program layouts"
+                            title: ""; subtitle: "Program layouts"
                             IconButton { iconName: "add"; tooltip: "Add scene"; onClicked: { sceneNameField.text = ""; sceneDialog.open() } }
                         }
                         ListView {
@@ -109,14 +164,15 @@ Item {
                         }
                     }
                 }
-                StudioPanel {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 282
+                DockPanel {
+                    id: sourcesPanel
+                    dockId: "sources"; dockTitle: "Sources"; workspace: workspace
+                    objectName: "sourcesPanel"
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 10
                         StudioSectionHeader {
-                            title: "Sources"; subtitle: "Layers in " + studioController.activeSceneName
+                            title: ""; subtitle: "Layers in " + studioController.activeSceneName
                             IconButton { iconName: "add"; tooltip: "Add source"; onClicked: { root.selectedSourceType = ""; sourceNameField.text = ""; sourcePickerDialog.open() } }
                         }
                         ListView {
@@ -157,16 +213,14 @@ Item {
                         Text { Layout.fillWidth: true; visible: sourcesView.count === 0; text: "Add a source to start composing this scene."; color: "#829399"; font.pixelSize: 11; wrapMode: Text.WordWrap }
                     }
                 }
-            }
-
             ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumWidth: 470
-                spacing: 12
+                objectName: "topWorkspace"
+                property var placement: workspace.panelRect("preview")
+                x: placement.x; y: placement.y; width: placement.width; height: placement.height
+                spacing: 8
                 StudioPanel {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    objectName: "previewPanel"
+                    Layout.fillWidth: true; Layout.fillHeight: true
                     contentMargin: 14
                     color: "#131E22"
                     border.color: "#30434A"
@@ -176,20 +230,21 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             Text { Layout.fillWidth: true; text: studioController.activeSceneName; color: "#F3F7F7"; font.pixelSize: 14; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                            StudioComboBox { objectName: "previewScaleMode"; Layout.preferredWidth: 82; Layout.preferredHeight: 28; model: ["Fit"]; currentIndex: 0 }
+                            Text { text: Math.round(previewCanvas.width / studioController.programWidth * 100) + "%"; color: "#8FA4A8"; font.pixelSize: 10; font.weight: Font.DemiBold }
                             Text { text: "PROGRAM PREVIEW"; color: "#8FA4A8"; font.pixelSize: 10; font.weight: Font.DemiBold }
                         }
                         Item {
                             id: previewFrame
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.minimumHeight: 260
+                            Layout.fillWidth: true; Layout.fillHeight: true
+                            objectName: "previewWorkspace"
+                            readonly property real canvasInset: width < 600 ? 16 : 24
                             clip: true
                             Rectangle {
                                 id: previewCanvas
                                 objectName: "previewCanvas"
-                                anchors.centerIn: parent
-                                width: Math.min(parent.width, parent.height * 16 / 9)
-                                height: Math.round(width * 9 / 16)
+                                property rect presentation: { const pw=studioController.programWidth; const ph=studioController.programHeight; return studioController.previewCanvasRect(previewFrame.width, previewFrame.height, previewFrame.canvasInset) }
+                                x: presentation.x; y: presentation.y; width: presentation.width; height: presentation.height
                                 color: "#000000"
                                 border.color: "#48616A"
                                 border.width: 1
@@ -198,18 +253,13 @@ Item {
                                     id: programPreviewLoader
                                     objectName: "programPreview"
                                     anchors.fill: parent
-                                    anchors.margins: 1
                                     active: appController.gpuPreviewEnabled
                                     sourceComponent: programPreviewComponent
                                 }
                                 Component {
                                     id: programPreviewComponent
                                     ProgramPreview {
-                                        programWidth: studioController.programWidth
-                                        programHeight: studioController.programHeight
-                                        layers: studioController.compositorLayers
-                                        recorder: studioController.recorder
-                                        recordingActive: studioController.recorder.state === "Recording"
+                                        engine: studioController.programEngine
                                     }
                                 }
                                 Text {
@@ -231,7 +281,9 @@ Item {
                                         model: studioController.sceneItemsModel
                                         delegate: Item {
                                             id: editorItem
+                                            objectName: "editorOverlay_" + itemId
                                             required property string itemId
+                                            required property string sourceId
                                             required property string name
                                             required property bool itemVisible
                                             required property bool itemLocked
@@ -262,23 +314,56 @@ Item {
                                             MouseArea {
                                                 anchors.fill: parent
                                                 hoverEnabled: true
+                                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                                 cursorShape: editorItem.itemLocked ? Qt.ArrowCursor : Qt.SizeAllCursor
                                                 property point pressPoint
                                                 property var startTransform
                                                 onPressed: event => {
                                                     studioController.selectItem(editorItem.itemId)
+                                                    if (event.button === Qt.RightButton) { canvasSourceMenu.open(); return }
                                                     if (editorItem.itemLocked) return
-                                                    pressPoint = Qt.point(event.x, event.y)
+                                                    pressPoint = mapToItem(programLayer, event.x, event.y)
                                                     startTransform = studioController.itemTransform(editorItem.itemId)
                                                 }
                                                 onPositionChanged: event => {
                                                     if (editorItem.itemLocked || !pressed || !startTransform) return
                                                     const next = studioController.itemTransform(editorItem.itemId)
-                                                    next.x = startTransform.x + (event.x - pressPoint.x) / programLayer.width * studioController.programWidth
-                                                    next.y = startTransform.y + (event.y - pressPoint.y) / programLayer.height * studioController.programHeight
-                                                    studioController.previewItemTransform(editorItem.itemId, next)
+                                                    const position = mapToItem(programLayer, event.x, event.y)
+                                                    next.x = startTransform.x + (position.x - pressPoint.x) / programLayer.width * studioController.programWidth
+                                                    next.y = startTransform.y + (position.y - pressPoint.y) / programLayer.height * studioController.programHeight
+                                                    root.queuePreviewTransform(editorItem.itemId, next)
                                                 }
-                                                onReleased: if (!editorItem.itemLocked) studioController.commitPreviewTransform()
+                                                onReleased: if (!editorItem.itemLocked) root.commitQueuedPreviewTransform()
+                                            }
+                                            StudioMenu {
+                                                id: canvasSourceMenu
+                                                StudioMenuItem { text: "Properties"; onTriggered: { root.propertiesSourceId = editorItem.sourceId; root.propertyConfiguration = studioController.sourceConfiguration(editorItem.sourceId); root.propertyTargets = studioController.captureTargets(editorItem.type); sourcePropertiesDialog.open() } }
+                                                StudioMenuItem { text: "Rename"; onTriggered: { root.renameSourceId = editorItem.sourceId; renameSourceField.text = editorItem.name; renameSourceDialog.open() } }
+                                                StudioMenuItem { text: editorItem.itemVisible ? "Hide source" : "Show source"; onTriggered: studioController.setItemVisible(editorItem.itemId, !editorItem.itemVisible) }
+                                                StudioMenuItem { text: editorItem.itemLocked ? "Unlock source" : "Lock source"; onTriggered: studioController.setItemLocked(editorItem.itemId, !editorItem.itemLocked) }
+                                                StudioMenu {
+                                                    title: "Order"
+                                                    StudioMenuItem { text: "Move to top"; onTriggered: studioController.moveSceneItemTo(editorItem.itemId, 0) }
+                                                    StudioMenuItem { text: "Move up"; onTriggered: studioController.moveSceneItem(editorItem.itemId, -1) }
+                                                    StudioMenuItem { text: "Move down"; onTriggered: studioController.moveSceneItem(editorItem.itemId, 1) }
+                                                    StudioMenuItem { text: "Move to bottom"; onTriggered: studioController.moveSceneItemTo(editorItem.itemId, studioController.sceneItemsModel.rowCount() - 1) }
+                                                }
+                                                StudioMenu {
+                                                    title: "Transform"
+                                                    StudioMenuItem { text: "Edit Transform"; onTriggered: { transformDialog.openFor(editorItem.itemId, studioController.itemTransform(editorItem.itemId)) } }
+                                                    StudioMenuItem { text: "Reset Transform"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "reset") }
+                                                    StudioMenuItem { text: "Fit to Canvas"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "fit") }
+                                                    StudioMenuItem { text: "Stretch to Canvas"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "stretch") }
+                                                    StudioMenuItem { text: "Center"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "center") }
+                                                    StudioMenuItem { text: "Center Horizontally"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "centerHorizontal") }
+                                                    StudioMenuItem { text: "Center Vertically"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "centerVertical") }
+                                                    StudioMenuItem { text: "Rotate 90 CW"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "rotate90Clockwise") }
+                                                    StudioMenuItem { text: "Rotate 90 CCW"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "rotate90CounterClockwise") }
+                                                    StudioMenuItem { text: "Rotate 180"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "rotate180") }
+                                                    StudioMenuItem { text: "Flip Horizontal"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "flipHorizontal") }
+                                                    StudioMenuItem { text: "Flip Vertical"; onTriggered: studioController.applyTransformAction(editorItem.itemId, "flipVertical") }
+                                                }
+                                                StudioMenuItem { text: "Remove"; destructive: true; onTriggered: { root.removeItemId = editorItem.itemId; removeSourceDialog.open() } }
                                             }
                                             Rectangle {
                                                 visible: editorItem.selected && !editorItem.itemLocked
@@ -289,16 +374,17 @@ Item {
                                                     cursorShape: Qt.SizeFDiagCursor
                                                     property point pressPoint
                                                     property var startTransform
-                                                    onPressed: event => { pressPoint = Qt.point(event.x, event.y); startTransform = studioController.itemTransform(editorItem.itemId) }
+                                                    onPressed: event => { pressPoint = mapToItem(programLayer, event.x, event.y); startTransform = studioController.itemTransform(editorItem.itemId) }
                                                     onPositionChanged: event => {
                                                         if (!pressed || !startTransform) return
                                                         const next = studioController.itemTransform(editorItem.itemId)
-                                                        const widthDelta = (event.x - pressPoint.x) / programLayer.width * studioController.programWidth
+                                                        const position = mapToItem(programLayer, event.x, event.y)
+                                                        const widthDelta = (position.x - pressPoint.x) / programLayer.width * studioController.programWidth
                                                         next.width = Math.max(1, startTransform.width + widthDelta / Math.max(0.01, startTransform.scaleX))
                                                         next.height = Math.max(1, startTransform.height * next.width / Math.max(1, startTransform.width))
-                                                        studioController.previewItemTransform(editorItem.itemId, next)
+                                                        root.queuePreviewTransform(editorItem.itemId, next)
                                                     }
-                                                    onReleased: studioController.commitPreviewTransform()
+                                                    onReleased: root.commitQueuedPreviewTransform()
                                                 }
                                             }
                                         }
@@ -309,8 +395,7 @@ Item {
                     }
                 }
                 StudioPanel {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 46
+                    Layout.fillWidth: true; Layout.preferredHeight: 46
                     RowLayout { anchors.fill: parent; spacing: 8
                         Rectangle { Layout.preferredWidth: 8; Layout.preferredHeight: 8; radius: 4; color: root.accent }
                         Text { Layout.fillWidth: true; text: studioController.statusMessage; color: "#AEBEC1"; font.pixelSize: 11; elide: Text.ElideRight }
@@ -318,20 +403,14 @@ Item {
                     }
                 }
             }
-
-            ColumnLayout {
-                Layout.preferredWidth: 264
-                Layout.minimumWidth: 240
-                Layout.fillHeight: true
-                spacing: 12
-                StudioPanel {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.minimumHeight: 216
+                DockPanel {
+                    id: mixerPanel
+                    dockId: "mixer"; dockTitle: "Audio Mixer"; workspace: workspace
+                    objectName: "mixerPanel"
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 10
-                        StudioSectionHeader { title: "Audio Mixer"; subtitle: "Inputs are inactive" }
+                        StudioSectionHeader { title: ""; subtitle: "Input levels" }
                         ListView {
                             id: mixerView
                             objectName: "mixerView"
@@ -349,16 +428,17 @@ Item {
                                 onRemoveRequested: { root.removeItemId = ""; root.removeSourceId = channelId; removeSourceDialog.open() }
                             }
                         }
-                        Text { Layout.fillWidth: true; visible: mixerView.count === 0; text: "No audio channels. Add a microphone or desktop-audio placeholder."; color: "#829399"; font.pixelSize: 11; wrapMode: Text.WordWrap }
+                        Text { Layout.fillWidth: true; visible: mixerView.count === 0; text: "No audio sources"; color: "#829399"; font.pixelSize: 11; wrapMode: Text.WordWrap }
                     }
                 }
-                StudioPanel {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 150
+                DockPanel {
+                    id: transitionPanel
+                    dockId: "transition"; dockTitle: "Scene Transitions"; workspace: workspace
+                    objectName: "transitionPanel"
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 8
-                        StudioSectionHeader { title: "Transition"; subtitle: "Between scenes" }
+                        StudioSectionHeader { title: ""; subtitle: "Between scenes" }
                         StudioComboBox { Layout.fillWidth: true; model: ["Cut", "Fade"]; currentIndex: studioController.transitionType === "Cut" ? 0 : 1; onActivated: studioController.setTransitionType(currentText) }
                         RowLayout { Layout.fillWidth: true; visible: studioController.transitionType === "Fade"
                             Text { text: "Duration"; color: "#AAB9BC"; font.pixelSize: 11 }
@@ -368,21 +448,21 @@ Item {
                         StudioSlider { Layout.fillWidth: true; visible: studioController.transitionType === "Fade"; from: 50; to: 2000; stepSize: 50; value: studioController.transitionDurationMs; onMoved: studioController.setTransitionDurationMs(value) }
                     }
                 }
-                StudioPanel {
+                DockPanel {
                     id: controlsPanel
+                    dockId: "controls"; dockTitle: "Controls"; workspace: workspace
                     objectName: "controlsPanel"
-                    Layout.fillWidth: true
-                    Layout.minimumHeight: controlsLayout.implicitHeight + contentMargin * 2
-                    Layout.preferredHeight: Layout.minimumHeight
                     color: "#172529"
                     ColumnLayout {
                         id: controlsLayout
                         anchors.fill: parent
                         spacing: 8
-                        StudioSectionHeader { title: "Controls"; subtitle: studioController.recorder.state === "Recording" ? "Recording locally" : "Streaming is not connected" }
-                        StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: "Start streaming"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
-                        StudioButton { Layout.fillWidth: true; implicitHeight: 34; text: studioController.recorder.state === "Recording" ? "Stop recording" : "Start recording"; enabled: studioController.recorder.state !== "Starting" && studioController.recorder.state !== "Stopping"; onClicked: studioController.toggleRecording(); ToolTip.visible: hovered; ToolTip.text: studioController.recorder.state === "Error" ? studioController.recorder.errorMessage : "Record the program locally as an MKV file." }
-                        StudioButton { objectName: "combinedOutputButton"; Layout.fillWidth: true; implicitHeight: 34; text: "Record + stream"; enabled: false; ToolTip.visible: hovered; ToolTip.text: "Output engine arrives in a later milestone." }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            StudioSectionHeader { Layout.fillWidth: true; title: ""; subtitle: studioController.recorder.state === "Recording" ? "Recording locally" : "Local recording" }
+                            Text { visible: studioController.recorder.state === "Recording" || studioController.recorder.state === "Stopping"; text: "REC  " + root.formatElapsed(studioController.recorder.elapsedMs); color: root.accent; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        }
+                        StudioButton { objectName: "recordingButton"; Layout.fillWidth: true; implicitHeight: 34; text: studioController.recorder.state === "Recording" ? "Stop recording" : "Start recording"; enabled: studioController.recorder.state !== "Starting" && studioController.recorder.state !== "Stopping"; onClicked: studioController.toggleRecording(); ToolTip.visible: hovered; ToolTip.text: studioController.recorder.state === "Error" ? studioController.recorder.errorMessage : "Record the program locally as an MKV file." }
                     }
                 }
             }
@@ -430,7 +510,7 @@ Item {
         title: "Add source"
         standardButtons: Dialog.Ok | Dialog.Cancel
         anchors.centerIn: parent
-        onOpened: { sourceNameField.text = ""; sourcePickerDialog.standardButton(Dialog.Ok).enabled = false }
+        onOpened: { sourceNameField.text = ""; sourcePickerDialog.standardButton(Dialog.Ok).enabled = root.selectedSourceType.length > 0 }
         onAccepted: studioController.addSource(root.selectedSourceType, sourceNameField.text)
         contentItem: ColumnLayout {
             implicitWidth: 390
@@ -445,11 +525,11 @@ Item {
                     checkable: true
                     checked: root.selectedSourceType === modelData
                     text: modelData
-                    onClicked: { root.selectedSourceType = modelData; sourcePickerDialog.standardButton(Dialog.Ok).enabled = sourceNameField.text.trim().length > 0 }
+                    onClicked: { root.selectedSourceType = modelData; sourceNameField.text = modelData; sourcePickerDialog.standardButton(Dialog.Ok).enabled = true }
                 }
             }
             Text { text: "Coming later: Browser Source, Media Source"; color: "#72858A"; font.pixelSize: 11 }
-            StudioTextField { id: sourceNameField; Layout.fillWidth: true; placeholderText: root.selectedSourceType.length > 0 ? root.selectedSourceType + " name" : "Choose a source type first"; enabled: root.selectedSourceType.length > 0; selectByMouse: true; onTextChanged: sourcePickerDialog.standardButton(Dialog.Ok).enabled = root.selectedSourceType.length > 0 && text.trim().length > 0 }
+            StudioTextField { id: sourceNameField; Layout.fillWidth: true; placeholderText: root.selectedSourceType.length > 0 ? root.selectedSourceType + " name" : "Choose a source type first"; enabled: root.selectedSourceType.length > 0; selectByMouse: true; onTextChanged: sourcePickerDialog.standardButton(Dialog.Ok).enabled = root.selectedSourceType.length > 0 }
         }
     }
     StudioDialog {

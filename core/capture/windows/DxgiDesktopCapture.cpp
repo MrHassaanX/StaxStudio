@@ -1,4 +1,5 @@
 #include "DxgiDesktopCapture.h"
+#include "core/capture/CaptureTypes.h"
 
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -14,6 +15,7 @@ template <typename T> void release(T *&value) { if (value) { value->Release(); v
 }
 
 struct DxgiDesktopCapture::Session final {
+    QString displayName;
 #ifdef Q_OS_WIN
     IDXGIOutputDuplication *duplication = nullptr;
     ID3D11Texture2D *copy = nullptr;
@@ -27,7 +29,10 @@ DxgiDesktopCapture::~DxgiDesktopCapture() { clear(); }
 DxgiDesktopCapture::Session *DxgiDesktopCapture::session(void *rawDevice, const QString &sourceId, const QString &displayName)
 {
 #ifdef Q_OS_WIN
-    if (Session *existing = sessions_.value(sourceId)) return existing;
+    if (Session *existing = sessions_.value(sourceId)) {
+        if (existing->displayName == displayName) return existing;
+        remove(sourceId);
+    }
     auto *device = static_cast<ID3D11Device *>(rawDevice);
     if (!device) return nullptr;
     IDXGIDevice *dxgiDevice = nullptr;
@@ -46,8 +51,10 @@ DxgiDesktopCapture::Session *DxgiDesktopCapture::session(void *rawDevice, const 
     release(adapter); release(dxgiDevice);
     if (!output1) return nullptr;
     auto *created = new Session;
+    created->displayName = displayName;
     output1->GetDesc(&created->output);
     const HRESULT result = output1->DuplicateOutput(device, &created->duplication);
+    if (FAILED(result)) lastError_ = quint32(result);
     release(output); release(output1);
     if (FAILED(result)) { delete created; return nullptr; }
     sessions_.insert(sourceId, created);
@@ -80,13 +87,18 @@ DxgiDesktopCapture::Frame DxgiDesktopCapture::acquire(void *rawDevice, void *raw
     if (!current) { result.message = QStringLiteral("DXGI output unavailable"); return result; }
     DXGI_OUTDUPL_FRAME_INFO info{};
     IDXGIResource *resource = nullptr;
+    ++calls_;
     const HRESULT acquired = current->duplication->AcquireNextFrame(0, &info, &resource);
-    if (acquired == DXGI_ERROR_WAIT_TIMEOUT && current->copy) {
+    if (acquired == DXGI_ERROR_WAIT_TIMEOUT) {
+        ++timeouts_;
+        if (!current->copy) return result;
         result.texture = current->copy; result.size = current->size; result.available = true;
     } else if (FAILED(acquired)) {
+        lastError_ = quint32(acquired);
         if (acquired == DXGI_ERROR_ACCESS_LOST) remove(sourceId);
         result.message = QStringLiteral("Desktop frame unavailable"); return result;
     } else {
+        ++frames_; lastTextureNs_ = mediaTimestampNs(); lastError_ = 0;
         auto releaseFrame = qScopeGuard([&] { release(resource); current->duplication->ReleaseFrame(); });
         ID3D11Texture2D *captured = nullptr;
         if (FAILED(resource->QueryInterface(IID_PPV_ARGS(&captured)))) { result.message = QStringLiteral("Desktop texture unavailable"); return result; }

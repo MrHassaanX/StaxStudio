@@ -79,7 +79,7 @@ StudioProject StudioRepository::load() const
     }
     for (const QJsonValue &value : root.value("mixerChannels").toArray()) {
         const QJsonObject item = value.toObject();
-        if (!item.value("id").toString().isEmpty()) project.mixerChannels.append({item.value("id").toString(), item.value("name").toString(), item.value("volume").toDouble(0.8), item.value("muted").toBool(false)});
+        if (!item.value("id").toString().isEmpty()) project.mixerChannels.append({item.value("id").toString(), item.value("name").toString(), item.value("volume").toDouble(1.0), item.value("muted").toBool(false)});
     }
     const QJsonObject transition = root.value("transition").toObject();
     project.transition.type = transition.value("type").toString() == "Cut" ? TransitionType::Cut : TransitionType::Fade;

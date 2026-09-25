@@ -197,6 +197,7 @@ bool SceneItemListModel::applyTransformAction(const QString &itemId, const QStri
     else if (action == QStringLiteral("centerVertical")) changed = project_->centerSceneItem(itemId, false, true);
     else if (action == QStringLiteral("rotate90Clockwise")) changed = project_->rotateSceneItem(itemId, 90.0);
     else if (action == QStringLiteral("rotate90CounterClockwise")) changed = project_->rotateSceneItem(itemId, -90.0);
+    else if (action == QStringLiteral("rotate180")) changed = project_->rotateSceneItem(itemId, 180.0);
     else if (action == QStringLiteral("flipHorizontal")) changed = project_->flipSceneItem(itemId, true);
     else if (action == QStringLiteral("flipVertical")) changed = project_->flipSceneItem(itemId, false);
     const int row = itemRow(itemId);

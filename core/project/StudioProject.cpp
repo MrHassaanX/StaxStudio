@@ -77,7 +77,17 @@ QString StudioProject::uniqueSceneName(const QString &name) const
 
 QString StudioProject::uniqueSourceName(const QString &name) const
 {
-    return uniqueName(name, QStringLiteral("New Source"), sources, [](const Source &source) { return source.name; });
+    const QString base = name.trimmed().isEmpty() ? QStringLiteral("New Source") : name.trimmed();
+    auto available = [&](const QString &candidate) {
+        for (const Source &source : sources)
+            if (source.name.compare(candidate, Qt::CaseInsensitive) == 0) return false;
+        return true;
+    };
+    if (available(base)) return base;
+    for (int suffix = 2;; ++suffix) {
+        const QString candidate = QStringLiteral("%1 %2").arg(base).arg(suffix);
+        if (available(candidate)) return candidate;
+    }
 }
 
 int StudioProject::sceneIndex(const QString &sceneId) const
@@ -147,7 +157,7 @@ Source &StudioProject::addSource(SourceType type)
     Scene *scene = activeScene();
     if (scene) scene->items.append({newId(), sources.last().id, {}, true, false, static_cast<int>(scene->items.size())});
     if (type == SourceType::Microphone || type == SourceType::DesktopAudio)
-        mixerChannels.append({sources.last().id, name, 0.8, false});
+        mixerChannels.append({sources.last().id, name, 1.0, false});
     return sources.last();
 }
 
@@ -302,7 +312,7 @@ bool StudioProject::renameSource(const QString &sourceId, const QString &request
 
 bool StudioProject::setMixerVolume(const QString &id, double volume)
 {
-    for (auto &channel : mixerChannels) if (channel.id == id) { channel.volume = qBound(0.0, volume, 1.0); return true; }
+    for (auto &channel : mixerChannels) if (channel.id == id) { channel.volume = qBound(0.0, volume, 10.0); return true; }
     return false;
 }
 
@@ -324,7 +334,7 @@ void StudioProject::normalize()
     QVector<MixerChannel> channels;
     for (const Source &source : sources) {
         if (source.type != SourceType::Microphone && source.type != SourceType::DesktopAudio) continue;
-        MixerChannel channel{source.id, source.name, 0.8, false};
+        MixerChannel channel{source.id, source.name, 1.0, false};
         for (const auto &saved : mixerChannels) if (saved.id == source.id) { channel = saved; break; }
         channel.name = source.name;
         channels.append(channel);

@@ -1,10 +1,12 @@
 #pragma once
 
 #include "StudioModels.h"
+#include "DockLayout.h"
 #include "core/audio/AudioInputManager.h"
 #include "core/capture/VisualSourceManager.h"
 #include "core/project/StudioRepository.h"
 #include "core/recorder/LocalRecorder.h"
+#include "core/render/ProgramRenderEngine.h"
 
 #include <QObject>
 #include <QVariantList>
@@ -27,9 +29,12 @@ class StudioController final : public QObject
     Q_PROPERTY(QVariantList compositorLayers READ compositorLayers NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged FINAL)
     Q_PROPERTY(QObject *recorder READ recorder CONSTANT FINAL)
+    Q_PROPERTY(QObject *programEngine READ programEngine CONSTANT FINAL)
+    Q_PROPERTY(DockLayout *dockLayout READ dockLayout CONSTANT FINAL)
 public:
     explicit StudioController(QObject *parent = nullptr);
     explicit StudioController(const QString &storageDirectory, QObject *parent = nullptr);
+    ~StudioController() override;
     QAbstractItemModel *scenesModel();
     QAbstractItemModel *sceneItemsModel();
     QAbstractItemModel *mixerModel();
@@ -44,6 +49,9 @@ public:
     QVariantList compositorLayers() const;
     QString statusMessage() const;
     QObject *recorder();
+    QObject *programEngine();
+    DockLayout *dockLayout() const { return dockLayout_; }
+    Q_INVOKABLE QRectF previewCanvasRect(double width, double height, double inset) const;
 
     Q_INVOKABLE void addScene(const QString &name);
     Q_INVOKABLE void renameScene(const QString &sceneId, const QString &name);
@@ -84,9 +92,9 @@ signals:
     void statusMessageChanged();
 
 private:
+    DockLayout *dockLayout_ = nullptr;
     void refresh();
     void save();
-    void forwardAudio();
     StudioRepository repository_;
     StudioProject project_;
     SceneListModel scenesModel_;
@@ -96,7 +104,6 @@ private:
     VisualSourceManager visualSources_;
     AudioInputManager audioSources_;
     LocalRecorder recorder_;
-    QTimer audioForwardTimer_;
-    QHash<QString, qint64> submittedAudioTimestamps_;
+    ProgramRenderEngine programEngine_;
     QString statusMessage_;
 };
