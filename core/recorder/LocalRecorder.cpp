@@ -263,19 +263,40 @@ void LocalRecorder::run(RecordingSettings settings, const QSize size)
     }
     QMetaObject::invokeMethod(this, [this] { elapsedTimer_.start(); emit elapsedChanged(); emit stateChanged(); }, Qt::QueuedConnection);
 
-    qint64 originNs = -1, nextVideoPts = 0, nextAudioPts = 0;
+    qint64 originNs = -1, nextVideoPts = 0, nextAudioPts = 0, audioTimelineEnd = 0, audioOriginNs = -1;
     const auto encodeAudioBlock = [&](const AudioBlock &audioBlock) {
         if (!audio || audioBlock.samples.isEmpty()) return;
-        const int inFrames = audioBlock.frameCount();
+        const int totalFrames = audioBlock.frameCount();
+        if (totalFrames <= 0) return;
+
+        // WASAPI packet delivery is event-driven and may coalesce or overlap
+        // buffers. The shared monotonic timestamp is the source-of-truth for
+        // the program audio timeline, not the sum of callback sample counts.
+        // Without this, overlapping stereo blocks can extend AAC duration.
+        if (audioOriginNs < 0) audioOriginNs = audioBlock.timestampNs;
+        const qint64 desiredPts = av_rescale_q(qMax<qint64>(0, audioBlock.timestampNs - audioOriginNs),
+                                               AVRational{1, 1'000'000'000}, audio->time_base);
+        if (desiredPts > audioTimelineEnd) {
+            const int gap = static_cast<int>(qMin<qint64>(desiredPts - audioTimelineEnd, 48'000 * 2LL));
+            QVector<float> silence(gap, 0.0f);
+            void *silentPlanes[] = {silence.data(), silence.data()};
+            if (av_audio_fifo_realloc(audioFifo, av_audio_fifo_size(audioFifo) + gap) < 0) return;
+            av_audio_fifo_write(audioFifo, silentPlanes, gap);
+            audioTimelineEnd += gap;
+        }
+        const int trim = static_cast<int>(qMin<qint64>(totalFrames, qMax<qint64>(0, audioTimelineEnd - desiredPts)));
+        const int inFrames = totalFrames - trim;
         if (inFrames <= 0) return;
         QVector<float> left(inFrames), right(inFrames);
         for (int frame = 0; frame < inFrames; ++frame) {
-            left[frame] = audioBlock.samples[frame * audioBlock.channelCount];
-            right[frame] = audioBlock.samples[frame * audioBlock.channelCount + qMin(1, audioBlock.channelCount - 1)];
+            const int sourceFrame = frame + trim;
+            left[frame] = audioBlock.samples[sourceFrame * audioBlock.channelCount];
+            right[frame] = audioBlock.samples[sourceFrame * audioBlock.channelCount + qMin(1, audioBlock.channelCount - 1)];
         }
         void *data[] = {left.data(), right.data()};
         if (av_audio_fifo_realloc(audioFifo, av_audio_fifo_size(audioFifo) + inFrames) < 0) return;
         av_audio_fifo_write(audioFifo, data, inFrames);
+        audioTimelineEnd += inFrames;
         while (av_audio_fifo_size(audioFifo) >= audio->frame_size) {
             av_frame_make_writable(audioFrame);
             av_audio_fifo_read(audioFifo, reinterpret_cast<void **>(audioFrame->data), audio->frame_size);

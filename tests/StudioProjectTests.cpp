@@ -47,6 +47,7 @@ private slots:
     void bestFitsPreviewWithoutChangingProgramSpace();
     void writesPlayableMkv();
     void writesCompleteSixtySecondMkvWithoutPreview();
+    void keepsAacTimelineBoundToAudioTimestamps();
 };
 
 void StudioProjectTests::createsAndSelectsScenes()
@@ -737,6 +738,52 @@ void StudioProjectTests::writesCompleteSixtySecondMkvWithoutPreview()
     QVERIFY2(qAbs(audioSeconds - videoSeconds) < 0.1,
              qPrintable(QStringLiteral("A/V duration mismatch: video %1 s, audio %2 s")
                  .arg(videoSeconds, 0, 'f', 3).arg(audioSeconds, 0, 'f', 3)));
+    av_packet_free(&packet);
+    avformat_close_input(&input);
+}
+
+void StudioProjectTests::keepsAacTimelineBoundToAudioTimestamps()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    LocalRecorder recorder;
+    RecordingSettings settings;
+    settings.outputDirectory = directory.path();
+    settings.frameRate = 60;
+    QVERIFY(recorder.start(settings, QSize(32, 32)));
+    QTRY_COMPARE(recorder.state(), RecordingState::Recording);
+
+    QImage image(32, 32, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    for (int frame = 0; frame < 60 * 60; ++frame)
+        recorder.submitVideoFrame({image, recordingFrameTimestampNs(frame, 60)});
+
+    // Each callback has 10 ms of samples but its source clock advances 5 ms.
+    // This reproduces overlapping WASAPI delivery. The old count-only path
+    // created 120 seconds of AAC; the timestamp-authoritative path is 60.
+    for (int block = 0; block < 60 * 200; ++block) {
+        AudioBlock audio{block * 5'000'000LL, 48000, 2, QVector<float>(480 * 2, 0.5f)};
+        recorder.submitAudioBlock(std::move(audio));
+        while (recorder.diagnostics().value("queuedAudioBlocks").toULongLong() > 48)
+            QTest::qWait(1);
+    }
+    recorder.stop();
+
+    AVFormatContext *input = nullptr;
+    QCOMPARE(avformat_open_input(&input, recorder.outputPath().toUtf8().constData(), nullptr, nullptr), 0);
+    QVERIFY(avformat_find_stream_info(input, nullptr) >= 0);
+    int audioStream = -1;
+    for (unsigned i = 0; i < input->nb_streams; ++i)
+        if (input->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) audioStream = static_cast<int>(i);
+    QVERIFY(audioStream >= 0);
+    qint64 end = 0;
+    AVPacket *packet = av_packet_alloc();
+    while (av_read_frame(input, packet) >= 0) {
+        if (packet->stream_index == audioStream) end = qMax(end, packet->pts + packet->duration);
+        av_packet_unref(packet);
+    }
+    const double seconds = end * av_q2d(input->streams[audioStream]->time_base);
+    QVERIFY2(qAbs(seconds - 60.0) < 0.1, qPrintable(QStringLiteral("AAC ended at %1 s").arg(seconds)));
     av_packet_free(&packet);
     avformat_close_input(&input);
 }
