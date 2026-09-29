@@ -26,7 +26,7 @@ ColumnLayout {
     }
     RowLayout { Layout.fillWidth: true; spacing: 7
         AudioMeter { Layout.preferredWidth: 27; Layout.preferredHeight: 21; muted: root.muted; levelDb: root.levelDb }
-        StudioSlider { Layout.fillWidth: true; from: -60; to: 20; referenceValue: 0; stepSize: 0.5; value: root.volume > 0 ? 20 * Math.log(root.volume) / Math.LN10 : -60; onMoved: root.volumeChangedByUser(value <= -60 ? 0 : Math.pow(10, value / 20)) }
+        StudioSlider { Layout.fillWidth: true; from: -60; to: 0; referenceValue: 0; stepSize: 0.5; value: root.volume > 0 ? 20 * Math.log(root.volume) / Math.LN10 : -60; onMoved: root.volumeChangedByUser(value <= -60 ? 0 : Math.pow(10, value / 20)) }
         Text { text: "0 dB"; color: "#87979C"; font.pixelSize: 10; Layout.preferredWidth: 30; horizontalAlignment: Text.AlignRight; MouseArea { anchors.fill: parent; onClicked: root.resetVolumeRequested() } }
     }
     StudioMenu {

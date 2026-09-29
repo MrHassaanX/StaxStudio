@@ -1,5 +1,6 @@
 #include "DxgiDesktopCapture.h"
 #include "core/capture/CaptureTypes.h"
+#include "DxgiPointer.h"
 
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -19,6 +20,12 @@ struct DxgiDesktopCapture::Session final {
 #ifdef Q_OS_WIN
     IDXGIOutputDuplication *duplication = nullptr;
     ID3D11Texture2D *copy = nullptr;
+    ID3D11Texture2D *withPointer = nullptr;
+    DxgiPointerRenderer pointer;
+    DXGI_OUTDUPL_POINTER_POSITION pointerPosition{};
+    QByteArray pointerBytes;
+    bool ownsFrame = false;
+    bool cursorEnabled = false;
     DXGI_OUTPUT_DESC output{};
 #endif
     QSize size;
@@ -65,7 +72,7 @@ DxgiDesktopCapture::Session *DxgiDesktopCapture::session(void *rawDevice, const 
 }
 
 DxgiDesktopCapture::Frame DxgiDesktopCapture::acquire(void *rawDevice, void *rawContext, const QString &sourceId,
-                                                       const QString &sourceType, const QString &targetId)
+                                                       const QString &sourceType, const QString &targetId, bool captureCursor)
 {
     Frame result;
 #ifdef Q_OS_WIN
@@ -77,7 +84,7 @@ DxgiDesktopCapture::Frame DxgiDesktopCapture::acquire(void *rawDevice, void *raw
     if (sourceType == QStringLiteral("Window Capture") || sourceType == QStringLiteral("Game Capture")) {
         bool ok = false;
         const HWND window = reinterpret_cast<HWND>(targetId.toULongLong(&ok));
-        if (!ok || !IsWindow(window) || IsIconic(window) || !GetWindowRect(window, &windowRect)) { result.message = QStringLiteral("Window unavailable"); return result; }
+        if (!ok || !IsWindow(window) || IsIconic(window) || !GetWindowRect(window, &windowRect)) { remove(sourceId); result.message = QStringLiteral("Window unavailable"); return result; }
         HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
         MONITORINFOEXW monitorInfo{}; monitorInfo.cbSize = sizeof(monitorInfo);
         if (!GetMonitorInfoW(monitor, &monitorInfo)) { result.message = QStringLiteral("Window display unavailable"); return result; }
@@ -87,6 +94,9 @@ DxgiDesktopCapture::Frame DxgiDesktopCapture::acquire(void *rawDevice, void *raw
     if (!current) { result.message = QStringLiteral("DXGI output unavailable"); return result; }
     DXGI_OUTDUPL_FRAME_INFO info{};
     IDXGIResource *resource = nullptr;
+    // Retain ownership while rendering, then release immediately before the
+    // next acquisition (DXGI's recommended frame-lifetime pattern).
+    if (current->ownsFrame) { current->duplication->ReleaseFrame(); current->ownsFrame = false; }
     ++calls_;
     const HRESULT acquired = current->duplication->AcquireNextFrame(0, &info, &resource);
     if (acquired == DXGI_ERROR_WAIT_TIMEOUT) {
@@ -94,12 +104,26 @@ DxgiDesktopCapture::Frame DxgiDesktopCapture::acquire(void *rawDevice, void *raw
         if (!current->copy) return result;
         result.texture = current->copy; result.size = current->size; result.available = true;
     } else if (FAILED(acquired)) {
+        ++failures_;
         lastError_ = quint32(acquired);
         if (acquired == DXGI_ERROR_ACCESS_LOST) remove(sourceId);
         result.message = QStringLiteral("Desktop frame unavailable"); return result;
     } else {
+        current->ownsFrame = true;
         ++frames_; lastTextureNs_ = mediaTimestampNs(); lastError_ = 0;
-        auto releaseFrame = qScopeGuard([&] { release(resource); current->duplication->ReleaseFrame(); });
+        if (info.LastPresentTime.QuadPart) ++desktopUpdates_;
+        if (info.LastMouseUpdateTime.QuadPart) ++pointerUpdates_;
+        if (info.AccumulatedFrames > 1) accumulatedFrames_ += info.AccumulatedFrames - 1;
+        auto releaseFrame = qScopeGuard([&] { release(resource); });
+        if (info.LastMouseUpdateTime.QuadPart) current->pointerPosition = info.PointerPosition;
+        if (info.PointerShapeBufferSize) {
+            current->pointerBytes.resize(info.PointerShapeBufferSize);
+            UINT required = 0;
+            DXGI_OUTDUPL_POINTER_SHAPE_INFO shape{};
+            const HRESULT hr = current->duplication->GetFramePointerShape(UINT(current->pointerBytes.size()), current->pointerBytes.data(), &required, &shape);
+            if (FAILED(hr)) { ++failures_; lastError_ = quint32(hr); result.message = QStringLiteral("DXGI pointer shape unavailable"); return result; }
+            current->pointer.setShape(device, current->pointerBytes, shape);
+        }
         ID3D11Texture2D *captured = nullptr;
         if (FAILED(resource->QueryInterface(IID_PPV_ARGS(&captured)))) { result.message = QStringLiteral("Desktop texture unavailable"); return result; }
         auto releaseCaptured = qScopeGuard([&] { release(captured); });
@@ -107,17 +131,30 @@ DxgiDesktopCapture::Frame DxgiDesktopCapture::acquire(void *rawDevice, void *raw
         const QSize size(static_cast<int>(description.Width), static_cast<int>(description.Height));
         if (!current->copy || current->size != size) {
             release(current->copy);
+            release(current->withPointer);
             description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
             description.CPUAccessFlags = 0;
             description.Usage = D3D11_USAGE_DEFAULT;
             description.MiscFlags = 0;
             if (FAILED(device->CreateTexture2D(&description, nullptr, &current->copy))) { result.message = QStringLiteral("GPU capture texture unavailable"); return result; }
+            description.BindFlags |= D3D11_BIND_RENDER_TARGET;
+            if (FAILED(device->CreateTexture2D(&description, nullptr, &current->withPointer))) { release(current->copy); result.message = QStringLiteral("GPU pointer target unavailable"); return result; }
             current->size = size;
         }
         context->CopyResource(current->copy, captured);
         result.texture = current->copy; result.size = current->size; result.available = true;
     }
     if (result.available) {
+        if (captureCursor && current->pointerPosition.Visible && current->pointer.hasShape()) {
+            if (acquired == S_OK || !current->cursorEnabled) {
+                context->CopyResource(current->withPointer, current->copy);
+                // PointerPosition is already the top-left in output pixels,
+                // not a hotspot coordinate; subtracting HotSpot would shift it.
+                current->pointer.draw(device, context, current->copy, current->withPointer, current->pointerPosition.Position);
+            }
+            result.texture = current->withPointer;
+        }
+        current->cursorEnabled = captureCursor;
         result.sourceRect = QRect(QPoint(0, 0), result.size);
         if (sourceType == QStringLiteral("Window Capture") || sourceType == QStringLiteral("Game Capture")) {
             const RECT desktop = current->output.DesktopCoordinates;
@@ -128,7 +165,7 @@ DxgiDesktopCapture::Frame DxgiDesktopCapture::acquire(void *rawDevice, void *raw
         }
     }
 #else
-    Q_UNUSED(rawDevice); Q_UNUSED(rawContext); Q_UNUSED(sourceId); Q_UNUSED(sourceType); Q_UNUSED(targetId);
+    Q_UNUSED(rawDevice); Q_UNUSED(rawContext); Q_UNUSED(sourceId); Q_UNUSED(sourceType); Q_UNUSED(targetId); Q_UNUSED(captureCursor);
     result.message = QStringLiteral("DXGI capture is only available on Windows");
 #endif
     return result;
@@ -139,7 +176,8 @@ void DxgiDesktopCapture::remove(const QString &sourceId)
     Session *current = sessions_.take(sourceId);
     if (!current) return;
 #ifdef Q_OS_WIN
-    release(current->copy); release(current->duplication);
+    if (current->ownsFrame) current->duplication->ReleaseFrame();
+    release(current->copy); release(current->withPointer); release(current->duplication);
 #endif
     delete current;
 }

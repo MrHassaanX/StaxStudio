@@ -8,6 +8,7 @@
 #include <QVariantList>
 
 #include <atomic>
+#include <functional>
 #include <thread>
 
 class LocalRecorder;
@@ -23,6 +24,7 @@ public:
     void updateSourceFrame(const QString &sourceId, const QImage &image, qint64 timestampNs);
     void updateTransform(const QString &itemId, const QVariantMap &transform);
     void setRecorder(LocalRecorder *recorder);
+    void setAudioDiagnosticsProvider(std::function<QVariantMap()> provider);
     [[nodiscard]] QSize programSize() const;
     [[nodiscard]] quint64 renderedFrames() const;
     [[nodiscard]] quint64 missedFrames() const;
@@ -39,11 +41,13 @@ private:
     QHash<QString, Item> items_;
     QSize programSize_{1920, 1080};
     LocalRecorder *recorder_ = nullptr;
+    std::function<QVariantMap()> audioDiagnosticsProvider_;
     std::jthread worker_;
     std::jthread monitor_;
     std::atomic<int> stage_{0};
     std::atomic<quint64> scheduledFrames_{0}, renderAttempts_{0}, generation_{0}, requestedFrames_{0}, submittedFrames_{0}, readbackDrops_{0};
     std::atomic<quint64> captureCalls_{0}, captureFrames_{0}, captureTimeouts_{0};
+    std::atomic<quint64> desktopUpdates_{0}, pointerUpdates_{0}, accumulatedCaptureFrames_{0}, captureFailures_{0};
     std::atomic<qint64> heartbeatNs_{0}, lastRenderNs_{0}, lastSubmittedNs_{0}, lastCaptureNs_{0};
     std::atomic<qint64> frameWorkNs_{0}, maxFrameWorkNs_{0}, readbackWorkNs_{0}, captureWorkNs_{0};
     std::atomic<quint32> captureError_{0};

@@ -141,12 +141,13 @@ void LocalRecorder::submitVideoFrame(RecordedVideoFrame frame)
     wake_.wakeOne();
 }
 
-void LocalRecorder::submitAudioBlock(AudioBlock block)
+void LocalRecorder::submitProgramAudio(ProgramMixedAudioBlock program)
 {
+    AudioBlock block=std::move(program.audio);
     // Reject malformed interleaved data at the recording boundary. In
     // particular, a stereo sample count must be an even number; treating it
     // as a frame count would double the AAC timeline.
-    if (!block.isValid()) return;
+    if (!block.isValid() || block.sampleRate!=48000 || block.channelCount!=2) return;
     QMutexLocker lock(&mutex_);
     if (state_ != RecordingState::Recording) return;
     ++submittedAudioBlocks_;
@@ -178,6 +179,7 @@ QVariantMap LocalRecorder::diagnostics() const
             {"program",programDiagnostics_},
             {"droppedVideoFrames", droppedVideoFrames_},
             {"receivedAudioBlocks", submittedAudioBlocks_}, {"queuedAudioBlocks", static_cast<qulonglong>(audioQueue_.size())},
+            {"recorderMixedBlocksReceived",submittedAudioBlocks_},
             {"droppedAudioBlocks", droppedAudioBlocks_}, {"encodedAacFrames", encodedAudioFrames_},
             {"firstAudioTimestampNs", firstAudioTimestampNs_}, {"lastAudioTimestampNs", lastAudioTimestampNs_},
             {"firstVideoTimestampNs", firstVideoTimestampNs_}, {"lastVideoTimestampNs", lastVideoTimestampNs_}};
@@ -269,10 +271,8 @@ void LocalRecorder::run(RecordingSettings settings, const QSize size)
         const int totalFrames = audioBlock.frameCount();
         if (totalFrames <= 0) return;
 
-        // WASAPI packet delivery is event-driven and may coalesce or overlap
-        // buffers. The shared monotonic timestamp is the source-of-truth for
-        // the program audio timeline, not the sum of callback sample counts.
-        // Without this, overlapping stereo blocks can extend AAC duration.
+        // Only the single program-mix timeline reaches this boundary. Retain
+        // gap/duplicate protection for queue loss, not cross-source arbitration.
         if (audioOriginNs < 0) audioOriginNs = audioBlock.timestampNs;
         const qint64 desiredPts = av_rescale_q(qMax<qint64>(0, audioBlock.timestampNs - audioOriginNs),
                                                AVRational{1, 1'000'000'000}, audio->time_base);

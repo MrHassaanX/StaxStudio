@@ -31,7 +31,7 @@ public:
     void stop();
     void fail(const QString &message);
     void submitVideoFrame(RecordedVideoFrame frame);
-    void submitAudioBlock(AudioBlock block);
+    void submitProgramAudio(ProgramMixedAudioBlock block);
     QString stateName() const;
     QString outputPath() const;
     QString errorMessage() const;

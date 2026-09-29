@@ -1,6 +1,7 @@
 #pragma once
 #include "core/audio/wasapi/WasapiAudioSource.h"
 #include "core/source/Source.h"
+#include "ProgramAudioMixer.h"
 #include <QHash>
 #include <QMutex>
 #include <QObject>
@@ -26,7 +27,7 @@ public:
     void discardPendingBlocks();
     QVariantMap diagnostics() const;
     void setMixControls(const QString &sourceId, double gain, bool muted);
-    void setRecordingSink(std::function<void(AudioBlock)> sink);
+    void setRecordingSink(std::function<void(ProgramMixedAudioBlock)> sink);
     void flushRecordingSink();
 signals:
     void metersChanged();
@@ -35,13 +36,15 @@ private:
     QVector<Entry> entriesSnapshot() const;
     void wakeMixer();
     void mixerLoop();
-    void drainToSink(const std::function<void(AudioBlock)> &sink);
+    void drainToSink(bool flush = false);
+    mutable QMutex processingMutex_;
+    ProgramAudioMixer programMixer_;
     mutable QMutex entriesMutex_;
     QHash<QString, Entry> entries_;
     QTimer meterTimer_;
     QMutex mixerMutex_;
     QWaitCondition mixerWake_;
-    std::function<void(AudioBlock)> recordingSink_;
+    std::function<void(ProgramMixedAudioBlock)> recordingSink_;
     bool mixerDirty_ = false;
     std::jthread mixerThread_;
     std::atomic_bool mixerRunning_ = true;

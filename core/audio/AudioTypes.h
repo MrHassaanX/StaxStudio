@@ -27,6 +27,9 @@ struct AudioBlock final {
     }
 };
 
+// Recorder boundary: one already-mixed stereo program timeline, not a device packet.
+struct ProgramMixedAudioBlock final { AudioBlock audio; };
+
 // Kept by a capture source so packet-by-packet rate conversion cannot drift
 // from the source clock over a long recording.
 struct AudioResampleState final {

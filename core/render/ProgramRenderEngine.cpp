@@ -32,6 +32,7 @@ struct ProgramRenderEngine::Item {
     QString sourceId;
     QString sourceType;
     QString targetId;
+    bool captureCursor = true;
     QVariantMap transform;
     QColor color;
     QImage image;
@@ -97,12 +98,20 @@ ProgramRenderEngine::ProgramRenderEngine(QObject *parent) : QObject(parent)
             QMutexLocker lock(&mutex_);
             if(!recorder_ || recorder_->state()!=RecordingState::Recording) continue;
             QVariantMap snapshot=diagnostics();
+            const QVariantMap audio = audioDiagnosticsProvider_ ? audioDiagnosticsProvider_() : QVariantMap{};
+            snapshot.insert("audioMix",audio.value("programMix"));
             recorder_->setProgramDiagnostics(snapshot);
             if(stage_==11) recorder_->fail(QStringLiteral("Program output failed; restart StaxStudio to reinitialize the graphics device."));
             snapshot.insert("recorder",recorder_->diagnostics());
             QFile log(recorder_->outputPath()+QStringLiteral(".diagnostics.jsonl"));
             if(log.open(QIODevice::WriteOnly|QIODevice::Append)) {
                 log.write(QJsonDocument::fromVariant(snapshot).toJson(QJsonDocument::Compact)); log.write("\n");
+                for (auto it = audio.cbegin(); it != audio.cend(); ++it) {
+                    QVariantMap event = it.value().toMap();
+                    event.insert("event", it.key()=="programMix" ? "audio_mix" : "audio_source");
+                    event.insert("sourceId", it.key());
+                    log.write(QJsonDocument::fromVariant(event).toJson(QJsonDocument::Compact)); log.write("\n");
+                }
             }
             if(recorder_->state()==RecordingState::Recording && recorder_->elapsedMs()>3000
                 && mediaTimestampNs()-lastSubmittedNs_.load()>3'000'000'000LL)
@@ -129,6 +138,7 @@ void ProgramRenderEngine::setScene(const QVariantList &layers, const QSize size)
         item.sourceId = v.value("sourceId").toString();
         item.sourceType = v.value("sourceType").toString();
         item.targetId = v.value("targetId").toString();
+        item.captureCursor = v.value("captureCursor", true).toBool();
         item.color = v.value("color").value<QColor>();
         item.image = v.value("image").value<QImage>();
         item.imageTimestampNs = v.value("timestampNs").toLongLong();
@@ -160,6 +170,11 @@ void ProgramRenderEngine::setRecorder(LocalRecorder *recorder)
 {
     QMutexLocker lock(&mutex_);
     recorder_ = recorder;
+}
+void ProgramRenderEngine::setAudioDiagnosticsProvider(std::function<QVariantMap()> provider)
+{
+    QMutexLocker lock(&mutex_);
+    audioDiagnosticsProvider_ = std::move(provider);
 }
 
 QSize ProgramRenderEngine::programSize() const { QMutexLocker lock(&mutex_); return programSize_; }
@@ -232,7 +247,7 @@ void ProgramRenderEngine::run()
             }
             const bool recording=recorder && recorder->state()==RecordingState::Recording;
             const bool preview=mediaTimestampNs()-lastPreviewRequestNs_.load()<500'000'000LL;
-            const int fps=recording ? recorder->frameRate() : 30;
+            const int fps=recording ? recorder->frameRate() : 60;
             if (previousFps!=fps) { epoch=Clock::now(); scheduleOriginNs=mediaTimestampNs(); tick=0; previousFps=fps; }
             stage_=2;
             const auto deadline=epoch+std::chrono::nanoseconds(recordingFrameTimestampNs(tick,fps));
@@ -285,6 +300,22 @@ void ProgramRenderEngine::run()
             }
             ++renderAttempts_;
             stage_=5;
+            // Capture/pointer passes precede the compositor pass so they cannot
+            // disturb its render target or pipeline state between source draws.
+            ID3D11ShaderResourceView *emptyViews[]{nullptr, nullptr};
+            gpu.context->PSSetShaderResources(0,2,emptyViews);
+            gpu.context->OMSetRenderTargets(0,nullptr,nullptr);
+            QHash<QString, DxgiDesktopCapture::Frame> desktopFrames;
+            for (const auto &item : layers) if (isDesktop(item.sourceType) && item.image.isNull()) {
+                stage_=6;
+                const qint64 captureStarted=mediaTimestampNs();
+                desktopFrames.insert(item.itemId, capture.acquire(gpu.device.Get(),gpu.context.Get(),item.itemId,item.sourceType,item.targetId,item.captureCursor));
+                captureTime+=mediaTimestampNs()-captureStarted;
+            }
+            captureCalls_=capture.calls(); captureFrames_=capture.frames(); captureTimeouts_=capture.timeouts();
+            desktopUpdates_=capture.desktopUpdates(); pointerUpdates_=capture.pointerUpdates();
+            accumulatedCaptureFrames_=capture.accumulatedFrames(); captureFailures_=capture.failures();
+            captureError_=capture.lastError(); lastCaptureNs_=capture.lastTextureNs();
             gpu.begin();
             for(const auto &item:layers) {
                 D3DProgramSurface::Com<ID3D11ShaderResourceView> view;
@@ -297,12 +328,7 @@ void ProgramRenderEngine::run()
                     }
                     view=cached.view; textureSize=item.image.size();
                 } else if(isDesktop(item.sourceType)) {
-                    stage_=6;
-                    const qint64 captureStarted=mediaTimestampNs();
-                    const auto frame=capture.acquire(gpu.device.Get(),gpu.context.Get(),item.itemId,item.sourceType,item.targetId);
-                    captureTime+=mediaTimestampNs()-captureStarted;
-                    captureCalls_=capture.calls(); captureFrames_=capture.frames(); captureTimeouts_=capture.timeouts();
-                    captureError_=capture.lastError(); lastCaptureNs_=capture.lastTextureNs();
+                    const auto frame=desktopFrames.value(item.itemId);
                     if(frame.available) {
                         view=gpu.view(static_cast<ID3D11Texture2D *>(frame.texture)); textureSize=frame.size; sourceRect=frame.sourceRect;
                     }
@@ -350,6 +376,8 @@ QVariantMap ProgramRenderEngine::diagnostics() const
         {"produced",renderedFrames_.load()},{"missedDeadlines",missedFrames_.load()},
         {"lastRenderNs",lastRenderNs_.load()},{"textureGeneration",generation_.load()},
         {"captureCalls",captureCalls_.load()},{"captureFrames",captureFrames_.load()},
+        {"desktopUpdates",desktopUpdates_.load()},{"pointerUpdates",pointerUpdates_.load()},
+        {"accumulatedCaptureFrames",accumulatedCaptureFrames_.load()},{"captureFailures",captureFailures_.load()},
         {"captureTimeouts",captureTimeouts_.load()},{"captureHRESULT",captureError_.load()},
         {"lastCaptureNs",lastCaptureNs_.load()},{"requested",requestedFrames_.load()},
         {"submitted",submittedFrames_.load()},{"readbackDrops",readbackDrops_.load()},

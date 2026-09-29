@@ -312,7 +312,7 @@ bool StudioProject::renameSource(const QString &sourceId, const QString &request
 
 bool StudioProject::setMixerVolume(const QString &id, double volume)
 {
-    for (auto &channel : mixerChannels) if (channel.id == id) { channel.volume = qBound(0.0, volume, 10.0); return true; }
+    for (auto &channel : mixerChannels) if (channel.id == id) { channel.volume = qBound(0.0, volume, 1.0); return true; }
     return false;
 }
 
@@ -337,6 +337,7 @@ void StudioProject::normalize()
         MixerChannel channel{source.id, source.name, 1.0, false};
         for (const auto &saved : mixerChannels) if (saved.id == source.id) { channel = saved; break; }
         channel.name = source.name;
+        channel.volume = qBound(0.0, channel.volume, 1.0);
         channels.append(channel);
     }
     mixerChannels = std::move(channels);

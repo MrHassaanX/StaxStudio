@@ -3,6 +3,7 @@
 #include "ui/render/ProgramPreview.h"
 #include "core/render/ProgramRenderEngine.h"
 #include "core/render/ProgramFrameMath.h"
+#include "core/capture/windows/DxgiPointer.h"
 #include "core/recorder/LocalRecorder.h"
 
 #include <QAbstractItemModelTester>
@@ -53,7 +54,61 @@ private slots:
     void outputSurvivesPreviewDetach();
     void gpuPreviewShowsAllCorners();
     void dockMouseInteractions();
+    void dxgiPointerComposition();
 };
+
+void StudioUiTests::dxgiPointerComposition()
+{
+#ifdef Q_OS_WIN
+    using Microsoft::WRL::ComPtr;
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    QVERIFY(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)));
+    const QRgb background = qRgb(40,80,120);
+    const QRgb pixels[16] = {background,background,background,background,background,background,background,background,
+                            background,background,background,background,background,background,background,background};
+    D3D11_TEXTURE2D_DESC desc{}; desc.Width=desc.Height=4; desc.MipLevels=desc.ArraySize=desc.SampleDesc.Count=1;
+    desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM; desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET;
+    D3D11_SUBRESOURCE_DATA initial{pixels,16,0};
+    ComPtr<ID3D11Texture2D> desktop, output, staging;
+    QVERIFY(SUCCEEDED(device->CreateTexture2D(&desc,&initial,&desktop)));
+    QVERIFY(SUCCEEDED(device->CreateTexture2D(&desc,nullptr,&output)));
+    desc.BindFlags=0; desc.Usage=D3D11_USAGE_STAGING; desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    QVERIFY(SUCCEEDED(device->CreateTexture2D(&desc,nullptr,&staging)));
+    DxgiPointerRenderer renderer;
+    auto render = [&](const QByteArray &bytes, DXGI_OUTDUPL_POINTER_SHAPE_INFO info, POINT position) {
+        renderer.setShape(device.Get(),bytes,info);
+        context->CopyResource(output.Get(),desktop.Get());
+        renderer.draw(device.Get(),context.Get(),desktop.Get(),output.Get(),position);
+        context->CopyResource(staging.Get(),output.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped))) return QImage{};
+        QImage image(4,4,QImage::Format_ARGB32);
+        for (int y=0;y<4;++y) memcpy(image.scanLine(y),static_cast<const char *>(mapped.pData)+y*mapped.RowPitch,16);
+        context->Unmap(staging.Get(),0); return image;
+    };
+    DXGI_OUTDUPL_POINTER_SHAPE_INFO info{};
+    info.Type=DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR; info.Width=2; info.Height=1; info.Pitch=8;
+    info.HotSpot={1,0}; // Position is already top-left; hotspot must not be subtracted.
+    const QRgb color[]{qRgba(255,0,0,255),qRgba(0,255,0,0)};
+    auto image=render(QByteArray(reinterpret_cast<const char *>(color),sizeof(color)),info,{1,1});
+    QCOMPARE(image.pixel(1,1),qRgb(255,0,0)); QCOMPARE(image.pixel(2,1),background); QCOMPARE(image.pixel(0,1),background);
+    image=render(QByteArray(reinterpret_cast<const char *>(color),sizeof(color)),info,{-1,0});
+    QCOMPARE(image.pixel(0,0),background);
+    info.Type=DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR;
+    const QRgb masked[]{qRgba(10,20,30,0),qRgba(255,255,255,255)};
+    image=render(QByteArray(reinterpret_cast<const char *>(masked),sizeof(masked)),info,{0,0});
+    QCOMPARE(image.pixel(0,0),qRgb(10,20,30)); QCOMPARE(image.pixel(1,0),qRgb(215,175,135));
+    info.Type=DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME; info.Width=4; info.Height=2; info.Pitch=1;
+    // Black, white, unchanged, inverted: AND 0011, XOR 0101.
+    image=render(QByteArray::fromHex("3050"),info,{0,2});
+    QCOMPARE(image.pixel(0,2),qRgb(0,0,0)); QCOMPARE(image.pixel(1,2),qRgb(255,255,255));
+    QCOMPARE(image.pixel(2,2),background); QCOMPARE(image.pixel(3,2),qRgb(215,175,135));
+    QVERIFY_EXCEPTION_THROWN(decodeDxgiPointer({},info),std::runtime_error);
+#else
+    QSKIP("Windows D3D11 pointer composition");
+#endif
+}
 
 void StudioUiTests::visibleRowsAndRepeatedLifecycle()
 {
@@ -375,6 +430,7 @@ void StudioUiTests::captureConfigurationUsesMonotonicTimestamps()
     auto *items = controller.sceneItemsModel();
     QCOMPARE(items->rowCount(), 1);
     const QString sourceId = role(items, 0, SceneItemListModel::SourceIdRole);
+    QCOMPARE(controller.compositorLayers().first().toMap().value("captureCursor").toBool(), true);
     const QVariantList displays = controller.captureTargets("Display Capture");
     if (!displays.isEmpty()) {
         const QString targetId = displays.first().toMap().value("id").toString();
@@ -382,6 +438,11 @@ void StudioUiTests::captureConfigurationUsesMonotonicTimestamps()
         const QVariantMap configuration = controller.sourceConfiguration(sourceId);
         QCOMPARE(configuration.value("targetId").toString(), targetId);
         QCOMPARE(configuration.value("captureCursor").toBool(), false);
+        QCOMPARE(controller.compositorLayers().first().toMap().value("captureCursor").toBool(), false);
+        StudioRepository saved(directory.path());
+        QCOMPARE(saved.load().source(sourceId)->configuration.value("captureCursor").toBool(), false);
+        controller.configureCaptureSource(sourceId, targetId, QString{}, true);
+        QCOMPARE(controller.compositorLayers().first().toMap().value("captureCursor").toBool(), true);
     }
 }
 

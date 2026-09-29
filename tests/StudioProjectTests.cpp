@@ -1,5 +1,8 @@
 #include "core/project/StudioProject.h"
 #include "core/audio/AudioProcessing.h"
+#include "core/audio/ProgramAudioMixer.h"
+#include "core/audio/wasapi/WasapiAudioSource.h"
+#include <QJsonDocument>
 #include "core/project/StudioRepository.h"
 #include "core/render/CompositorScene.h"
 #include "core/render/ProgramFrameMath.h"
@@ -35,6 +38,10 @@ private slots:
     void notifiesSourceModelMutations();
     void keepsModelsConsistentThroughRepeatedLifecycleChanges();
     void normalizesAudioBlocks();
+    void programMixerAlignsAndBoundsSources();
+    void recordsSimultaneousProgramAudio_data();
+    void recordsSimultaneousProgramAudio();
+    void optionalWasapiEndpointProbe();
     void convertsNativePcmAtUnity();
     void dockLayoutSupportsNestedMovesAndPersistence();
     void preservesLongRunAudioResampleCounts();
@@ -49,6 +56,178 @@ private slots:
     void writesCompleteSixtySecondMkvWithoutPreview();
     void keepsAacTimelineBoundToAudioTimestamps();
 };
+
+void StudioProjectTests::programMixerAlignsAndBoundsSources()
+{
+    ProgramAudioMixer mixer;
+    mixer.reset(0);
+    mixer.push("mic", {0,48000,1,QVector<float>(480,0.2f)});
+    mixer.push("desktop", {5'000'000,48000,2,QVector<float>(960,0.3f)});
+    // Duplicate the same microphone packet: it must not double that source.
+    mixer.push("mic", {0,48000,1,QVector<float>(480,0.2f)});
+    QVector<ProgramMixedAudioBlock> out;
+    mixer.produceUntil(20'000'000,[&](auto block){out.append(std::move(block));});
+    QCOMPARE(out.size(),2);
+    for(int i=0;i<960;++i) {
+        const float expected=i<240?0.2f:i<480?0.5f:i<720?0.3f:0;
+        const auto &block=out[i/480].audio;
+        QVERIFY(std::abs(block.samples[(i%480)*2]-expected)<1e-6f);
+        QCOMPARE(block.samples[(i%480)*2],block.samples[(i%480)*2+1]);
+    }
+    mixer.push("late",{0,48000,1,QVector<float>(480,1)});
+    mixer.push("future",{9'000'000'000LL,48000,1,QVector<float>(480,1)});
+    QCOMPARE(mixer.diagnostics().value("lateSourceBlocks").toULongLong(),1ULL);
+    QCOMPARE(mixer.diagnostics().value("rejectedSourceBlocks").toULongLong(),1ULL);
+    mixer.reset(0);
+    mixer.push("mic",{0,48000,1,QVector<float>(480,0.2f)});
+    mixer.produceUntil(10'000'000,[&](auto block){QCOMPARE(block.audio.samples.first(),0.2f);});
+    mixer.reset(0);
+    AudioBlock surround{0,48000,3,QVector<float>(480*3)};
+    for(int i=0;i<480;++i) {surround.samples[i*3]=0.2f;surround.samples[i*3+1]=0.3f;surround.samples[i*3+2]=0.9f;}
+    mixer.push("existing-front-channel-mapping",std::move(surround));
+    mixer.produceUntil(10'000'000,[&](auto block){QCOMPARE(block.audio.samples[0],0.2f);QCOMPARE(block.audio.samples[1],0.3f);});
+}
+
+void StudioProjectTests::recordsSimultaneousProgramAudio_data()
+{
+    QTest::addColumn<int>("scenario");
+    QTest::newRow("microphone-only")<<0;
+    QTest::newRow("desktop-only")<<1;
+    QTest::newRow("two-simultaneous-tones")<<2;
+    QTest::newRow("desktop-start20-stop40")<<3;
+}
+
+void StudioProjectTests::recordsSimultaneousProgramAudio()
+{
+    QFETCH(int,scenario);
+    QTemporaryDir directory;
+    LocalRecorder recorder;
+    RecordingSettings settings; settings.outputDirectory=directory.path(); settings.frameRate=60;
+    QVERIFY(recorder.start(settings,{32,32}));
+    QTRY_COMPARE(recorder.state(),RecordingState::Recording);
+    QImage image(32,32,QImage::Format_ARGB32); image.fill(Qt::blue);
+    recorder.submitVideoFrame({image,0});
+    recorder.submitVideoFrame({image,recordingFrameTimestampNs(3599,60)});
+    ProgramAudioMixer mixer; mixer.reset(0);
+    qint64 emitted=0;
+    const auto consume=[&](ProgramMixedAudioBlock block) {
+        QCOMPARE(block.audio.timestampNs,emitted*10'000'000LL);
+        QCOMPARE(block.audio.frameCount(),480);
+        recorder.submitProgramAudio(std::move(block)); ++emitted;
+        while(recorder.diagnostics().value("queuedAudioBlocks").toInt()>48) QTest::qWait(1);
+    };
+    for(int tick=0;tick<6000;++tick) {
+        const qint64 time=tick*10'000'000LL;
+        if(scenario!=1) {
+            AudioBlock a{time,48000,1,QVector<float>(480)};
+            for(int i=0;i<480;++i) a.samples[i]=0.2f*std::sin(2*M_PI*440*(tick*480+i)/48000.0);
+            mixer.push("mic",std::move(a));
+        }
+        // Stagger arrivals as independent WASAPI workers do. Neither source
+        // can force an interval out before the bounded collection deadline.
+        mixer.produceUntil(time-ProgramAudioMixer::LatencyNs,consume);
+        if(scenario==1 || scenario==2 || (scenario==3 && tick>=2000 && tick<4000)) {
+            // Different packetization as well: two 5-ms stereo packets.
+            for(int part=0;part<2;++part) {
+                AudioBlock b{time+part*5'000'000LL,48000,2,QVector<float>(480)};
+                for(int i=0;i<240;++i) {
+                    const float v=std::sin(2*M_PI*880*(tick*480+part*240+i)/48000.0);
+                    b.samples[i*2]=0.15f*v; b.samples[i*2+1]=0.1f*v;
+                }
+                mixer.push("desktop",std::move(b));
+            }
+        }
+        mixer.produceUntil(time+5'000'000-ProgramAudioMixer::LatencyNs,consume);
+    }
+    mixer.produceUntil(60'000'000'000LL,consume);
+    recorder.stop();
+    QCOMPARE(recorder.state(),RecordingState::Idle);
+    QCOMPARE(emitted,6000LL);
+    QCOMPARE(mixer.diagnostics().value("sourceBlocksReceived").toULongLong(),
+             scenario==0?6000ULL:scenario==1?12000ULL:scenario==2?18000ULL:10000ULL);
+    QCOMPARE(mixer.diagnostics().value("lateSourceBlocks").toULongLong(),0ULL);
+    QCOMPARE(mixer.diagnostics().value("mixedFramesProduced").toULongLong(),2'880'000ULL);
+    QCOMPARE(recorder.diagnostics().value("recorderMixedBlocksReceived").toULongLong(),6000ULL);
+    QCOMPARE(recorder.diagnostics().value("droppedAudioBlocks").toULongLong(),0ULL);
+    AVFormatContext *input=nullptr;
+    QCOMPARE(avformat_open_input(&input,recorder.outputPath().toUtf8().constData(),nullptr,nullptr),0);
+    QVERIFY(avformat_find_stream_info(input,nullptr)>=0);
+    const int index=av_find_best_stream(input,AVMEDIA_TYPE_AUDIO,-1,-1,nullptr,0);
+    QVERIFY(index>=0);
+    const double duration=double(input->duration)/AV_TIME_BASE;
+    QVERIFY(std::abs(duration-60)<0.15);
+    AVCodecContext *decoder=avcodec_alloc_context3(avcodec_find_decoder(input->streams[index]->codecpar->codec_id));
+    QVERIFY(avcodec_parameters_to_context(decoder,input->streams[index]->codecpar)>=0);
+    QVERIFY(avcodec_open2(decoder,decoder->codec,nullptr)>=0);
+    AVPacket *packet=av_packet_alloc(); AVFrame *frame=av_frame_alloc();
+    QVector<float> left,right;
+    const auto receive=[&] {
+        while(avcodec_receive_frame(decoder,frame)==0) {
+            QCOMPARE(frame->format,int(AV_SAMPLE_FMT_FLTP)); QCOMPARE(frame->ch_layout.nb_channels,2);
+            const auto *l=reinterpret_cast<float *>(frame->extended_data[0]);
+            const auto *r=reinterpret_cast<float *>(frame->extended_data[1]);
+            for(int i=0;i<frame->nb_samples;++i) {left.append(l[i]);right.append(r[i]);}
+        }
+    };
+    qint64 lastPts=AV_NOPTS_VALUE;
+    while(av_read_frame(input,packet)>=0) {
+        if(packet->stream_index==index) {
+            QVERIFY(lastPts==AV_NOPTS_VALUE || packet->pts>=lastPts); lastPts=packet->pts;
+            QVERIFY(avcodec_send_packet(decoder,packet)>=0); receive();
+        }
+        av_packet_unref(packet);
+    }
+    avcodec_send_packet(decoder,nullptr); receive();
+    QVERIFY(std::abs(double(left.size())/48000-60)<0.15);
+    // Measure both tones in EACH half-second window, not just whole-file FFT.
+    const auto amplitude=[](const QVector<float> &samples,int begin,int frequency) {
+        double re=0,im=0;
+        for(int i=0;i<24000;++i) {double phase=2*M_PI*frequency*i/48000.; re+=samples[begin+i]*std::cos(phase); im+=samples[begin+i]*std::sin(phase);}
+        return 2*std::hypot(re,im)/24000;
+    };
+    for(int second=1;second<59;++second) {
+        const int begin=second*48000+12000;
+        const bool mic=scenario!=1, desktop=scenario==1||scenario==2||(scenario==3&&second>=20&&second<40);
+        QVERIFY(std::abs(amplitude(left,begin,440)-(mic?0.2:0))<0.025);
+        QVERIFY(std::abs(amplitude(right,begin,440)-(mic?0.2:0))<0.025);
+        QVERIFY(std::abs(amplitude(left,begin,880)-(desktop?0.15:0))<0.025);
+        QVERIFY(std::abs(amplitude(right,begin,880)-(desktop?0.1:0))<0.025);
+    }
+    // Search ALL 240 possible 5-ms boundary phases after AAC, not only phase 0.
+    double energies[240]{}; int counts[240]{}; double maxStep=0;
+    for(int i=48000;i<59*48000;++i) {
+        if(scenario==3 && (std::abs(i-20*48000)<4800 || std::abs(i-40*48000)<4800)) continue;
+        const double delta=left[i]-left[i-1]; maxStep=std::max(maxStep,std::abs(delta));
+        energies[i%240]+=delta*delta; ++counts[i%240];
+    }
+    double mean=0,maximum=0;
+    for(int i=0;i<240;++i) {energies[i]/=counts[i];mean+=energies[i]/240;maximum=std::max(maximum,energies[i]);}
+    QVERIFY(maxStep<0.09);
+    QVERIFY(std::sqrt(maximum/mean)<1.9);
+    qInfo()<<"Program mix validation"<<scenario<<"duration"<<duration<<"blocks"<<emitted<<"max step"<<maxStep<<"boundary RMS ratio"<<std::sqrt(maximum/mean);
+    av_frame_free(&frame);av_packet_free(&packet);avcodec_free_context(&decoder);avformat_close_input(&input);
+}
+
+void StudioProjectTests::optionalWasapiEndpointProbe()
+{
+    if (!qEnvironmentVariableIsSet("STAX_WASAPI_PROBE_ENDPOINT")) QSKIP("Opt-in hardware diagnostic only");
+    const QString requested = qEnvironmentVariable("STAX_WASAPI_PROBE_ENDPOINT");
+    WasapiAudioSource source(requested, false);
+    source.setMixControls(1.0, false);
+    source.start();
+    for (int second = 0; second < 5; ++second) {
+        QTest::qWait(1100);
+        source.discardPendingBlocks();
+        qInfo().noquote() << QJsonDocument::fromVariant(source.diagnostics()).toJson(QJsonDocument::Compact);
+    }
+    source.stop();
+    const auto diagnostic = source.diagnostics();
+    QCOMPARE(diagnostic.value("requestedEndpointId").toString(), requested);
+    if (!requested.isEmpty()) QCOMPARE(diagnostic.value("endpointId").toString(), requested);
+    QVERIFY(diagnostic.value("capturedBlocks").toULongLong() > 0);
+    QVERIFY(diagnostic.value("WindowsEndpointPeakDbfs").isValid());
+    QVERIFY(diagnostic.value("CapturedSamplePeakDbfs").isValid());
+}
 
 void StudioProjectTests::createsAndSelectsScenes()
 {
@@ -587,7 +766,7 @@ void StudioProjectTests::writesPlayableMkv()
         AudioBlock audio{blockIndex * 21'333'333LL, 48000, 1, QVector<float>(1024)};
         for (int sample = 0; sample < 1024; ++sample)
             audio.samples[sample] = 0.3f * qSin(2.0 * M_PI * 440.0 * (blockIndex * 1024 + sample) / 48000.0);
-        recorder.submitAudioBlock(std::move(audio));
+        recorder.submitProgramAudio({AudioProcessing::mixToStereo({audio})});
         // Let the bounded asynchronous recorder consume a realistic burst
         // before producing more audio. A lost tail must fail this test.
         if ((blockIndex + 1) % 64 == 0) QTest::qWait(20);
@@ -692,7 +871,7 @@ void StudioProjectTests::writesCompleteSixtySecondMkvWithoutPreview()
                 block.samples[sample * 2] = value;
                 block.samples[sample * 2 + 1] = value;
             }
-            recorder.submitAudioBlock(std::move(block));
+            recorder.submitProgramAudio({AudioProcessing::mixToStereo({block})});
             audioPosition += count;
         }
         while (recorder.diagnostics().value("queuedVideoFrames").toULongLong() > 1 ||
@@ -758,12 +937,11 @@ void StudioProjectTests::keepsAacTimelineBoundToAudioTimestamps()
     for (int frame = 0; frame < 60 * 60; ++frame)
         recorder.submitVideoFrame({image, recordingFrameTimestampNs(frame, 60)});
 
-    // Each callback has 10 ms of samples but its source clock advances 5 ms.
-    // This reproduces overlapping WASAPI delivery. The old count-only path
-    // created 120 seconds of AAC; the timestamp-authoritative path is 60.
+    // Defensive duplicate PROGRAM submission, not a model of separate devices.
+    // Real source overlap is now summed in ProgramAudioMixer before this API.
     for (int block = 0; block < 60 * 200; ++block) {
         AudioBlock audio{block * 5'000'000LL, 48000, 2, QVector<float>(480 * 2, 0.5f)};
-        recorder.submitAudioBlock(std::move(audio));
+        recorder.submitProgramAudio({AudioProcessing::mixToStereo({audio})});
         while (recorder.diagnostics().value("queuedAudioBlocks").toULongLong() > 48)
             QTest::qWait(1);
     }

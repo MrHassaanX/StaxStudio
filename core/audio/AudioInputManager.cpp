@@ -39,6 +39,7 @@ AudioInputManager::~AudioInputManager()
     mixerRunning_ = false;
     mixerWake_.wakeAll();
     if (mixerThread_.joinable()) mixerThread_.join();
+    entries_.clear(); // Join source callbacks while wake/lock members still exist.
 }
 void AudioInputManager::synchronizeSources(const QVector<Source> &sources)
 {
@@ -85,6 +86,8 @@ void AudioInputManager::discardPendingBlocks()
 QVariantMap AudioInputManager::diagnostics() const
 {
     QVariantMap result;
+    QMutexLocker processing(&processingMutex_);
+    result.insert("programMix",programMixer_.diagnostics());
     QMutexLocker lock(&entriesMutex_);
     for (auto it = entries_.cbegin(); it != entries_.cend(); ++it) result.insert(it.key(), it->source->diagnostics());
     return result;
@@ -95,16 +98,16 @@ void AudioInputManager::setMixControls(const QString &id, const double gain, con
     const auto it = entries_.find(id);
     if (it != entries_.end()) it->source->setMixControls(gain, muted);
 }
-void AudioInputManager::setRecordingSink(std::function<void(AudioBlock)> sink)
+void AudioInputManager::setRecordingSink(std::function<void(ProgramMixedAudioBlock)> sink)
 {
-    { QMutexLocker lock(&mixerMutex_); recordingSink_ = std::move(sink); mixerDirty_ = true; }
+    { QMutexLocker lock(&processingMutex_);
+      if(sink && !recordingSink_) { discardPendingBlocks(); programMixer_.reset(mediaTimestampNs()); }
+      recordingSink_ = std::move(sink); }
     mixerWake_.wakeAll();
 }
 void AudioInputManager::flushRecordingSink()
 {
-    std::function<void(AudioBlock)> sink;
-    { QMutexLocker lock(&mixerMutex_); sink = recordingSink_; }
-    if (sink) drainToSink(sink);
+    drainToSink(true);
 }
 void AudioInputManager::wakeMixer()
 {
@@ -115,27 +118,21 @@ void AudioInputManager::wakeMixer()
 void AudioInputManager::mixerLoop()
 {
     while (mixerRunning_) {
-        std::function<void(AudioBlock)> sink;
         {
             QMutexLocker lock(&mixerMutex_);
-            while (mixerRunning_ && (!recordingSink_ || !mixerDirty_)) mixerWake_.wait(&mixerMutex_);
+            if (mixerRunning_ && !mixerDirty_) mixerWake_.wait(&mixerMutex_,10);
             if (!mixerRunning_) break;
-            sink = recordingSink_;
             mixerDirty_ = false;
         }
-        if (sink) drainToSink(sink);
+        drainToSink();
     }
 }
-void AudioInputManager::drainToSink(const std::function<void(AudioBlock)> &sink)
+void AudioInputManager::drainToSink(bool flush)
 {
-    QVector<QVector<AudioBlock>> perSource;
-    for (const Entry &entry : entriesSnapshot()) perSource.append(entry.source->takePendingBlocks());
-    int batches = 0;
-    for (const QVector<AudioBlock> &blocks : perSource) batches = qMax(batches, blocks.size());
-    for (int batch = 0; batch < batches; ++batch) {
-        QVector<AudioBlock> sources;
-        for (const QVector<AudioBlock> &blocks : perSource) if (batch < blocks.size()) sources.append(blocks.at(batch));
-        AudioBlock mixed = AudioProcessing::mixToStereo(sources);
-        if (mixed.isValid()) sink(std::move(mixed));
-    }
+    QMutexLocker processing(&processingMutex_);
+    auto pending=takePendingBlocks();
+    if(!recordingSink_) return;
+    for(auto it=pending.begin();it!=pending.end();++it)
+        for(auto &block:it.value()) programMixer_.push(it.key(),std::move(block));
+    programMixer_.produceUntil(mediaTimestampNs()-(flush?0:ProgramAudioMixer::LatencyNs),recordingSink_);
 }

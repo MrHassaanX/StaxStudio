@@ -36,6 +36,7 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
     connect(&audioSources_, &AudioInputManager::metersChanged, this, [this] { for (const MixerChannel &channel : project_.mixerChannels) mixerModel_.setLevel(channel.id, audioSources_.levelDb(channel.id)); });
     visualSources_.synchronizeSources(project_.sources);
     programEngine_.setRecorder(&recorder_);
+    programEngine_.setAudioDiagnosticsProvider([this] { return audioSources_.diagnostics(); });
     programEngine_.setScene(compositorLayers(), project_.programResolution.size());
     audioSources_.synchronizeSources(project_.sources);
     for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
@@ -46,7 +47,7 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
             : state == QStringLiteral("Recording") ? QStringLiteral("Recording to %1").arg(recorder_.outputPath())
             : QStringLiteral("Recorder %1").arg(state.toLower());
         if (recorder_.state() == RecordingState::Recording) {
-            audioSources_.setRecordingSink([this](AudioBlock block) { recorder_.submitAudioBlock(std::move(block)); });
+            audioSources_.setRecordingSink([this](ProgramMixedAudioBlock block) { recorder_.submitProgramAudio(std::move(block)); });
         } else {
             audioSources_.setRecordingSink({});
         }
@@ -96,6 +97,7 @@ QVariantList StudioController::compositorLayers() const
                                   {"flipVertical", layer.transform.flipVertical}, {"color", layer.frame.color}, {"image", captured.image},
                                   {"sourceType", source ? sourceTypeName(source->type) : QString{}},
                                   {"targetId", source ? source->configuration.value("targetId").toString() : QString{}},
+                                  {"captureCursor", source ? source->configuration.value("captureCursor").toBool(true) : true},
                                   {"timestampNs", captured.timestampNs}, {"zOrder", layer.zOrder}});
     }
     return values;
