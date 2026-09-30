@@ -4,6 +4,7 @@
 #include "core/render/ProgramResolution.h"
 #include "core/scene/Scene.h"
 #include "core/source/Source.h"
+#include "core/streaming/StreamingTypes.h"
 #include "core/transition/TransitionSettings.h"
 
 #include <QString>
@@ -24,6 +25,7 @@ public:
     QVector<MixerChannel> mixerChannels;
     ProgramResolution programResolution = ProgramResolution::hd1080();
     TransitionSettings transition;
+    StreamSettings streamSettings;
 
     [[nodiscard]] const Scene *activeScene() const;
     [[nodiscard]] Scene *activeScene();

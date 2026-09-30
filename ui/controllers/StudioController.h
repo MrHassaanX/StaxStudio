@@ -7,6 +7,7 @@
 #include "core/project/StudioRepository.h"
 #include "core/recorder/LocalRecorder.h"
 #include "core/render/ProgramRenderEngine.h"
+#include "core/streaming/StreamingOutput.h"
 
 #include <QObject>
 #include <QVariantList>
@@ -29,7 +30,13 @@ class StudioController final : public QObject
     Q_PROPERTY(QVariantList compositorLayers READ compositorLayers NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged FINAL)
     Q_PROPERTY(QObject *recorder READ recorder CONSTANT FINAL)
+    Q_PROPERTY(QObject *streamer READ streamer CONSTANT FINAL)
     Q_PROPERTY(QObject *programEngine READ programEngine CONSTANT FINAL)
+    Q_PROPERTY(QString streamServerUrl READ streamServerUrl NOTIFY projectChanged FINAL)
+    Q_PROPERTY(QString streamKey READ streamKey NOTIFY streamKeyChanged FINAL)
+    Q_PROPERTY(int streamVideoBitrateKbps READ streamVideoBitrateKbps NOTIFY projectChanged FINAL)
+    Q_PROPERTY(int streamAudioBitrateKbps READ streamAudioBitrateKbps NOTIFY projectChanged FINAL)
+    Q_PROPERTY(int streamFrameRate READ streamFrameRate NOTIFY projectChanged FINAL)
     Q_PROPERTY(DockLayout *dockLayout READ dockLayout CONSTANT FINAL)
 public:
     explicit StudioController(QObject *parent = nullptr);
@@ -49,7 +56,13 @@ public:
     QVariantList compositorLayers() const;
     QString statusMessage() const;
     QObject *recorder();
+    QObject *streamer();
     QObject *programEngine();
+    QString streamServerUrl() const;
+    QString streamKey() const;
+    int streamVideoBitrateKbps() const;
+    int streamAudioBitrateKbps() const;
+    int streamFrameRate() const;
     DockLayout *dockLayout() const { return dockLayout_; }
     Q_INVOKABLE QRectF previewCanvasRect(double width, double height, double inset) const;
 
@@ -85,16 +98,20 @@ public:
     Q_INVOKABLE void setProfileName(const QString &name);
     Q_INVOKABLE void showUnavailableAction(const QString &action);
     Q_INVOKABLE void toggleRecording();
+    Q_INVOKABLE void setStreamConfiguration(const QString &serverUrl, const QString &streamKey, int videoBitrateKbps, int audioBitrateKbps, int frameRate);
+    Q_INVOKABLE void toggleStreaming();
 
 signals:
     void projectChanged();
     void selectedItemChanged();
     void statusMessageChanged();
+    void streamKeyChanged();
 
 private:
     DockLayout *dockLayout_ = nullptr;
     void refresh();
     void save();
+    void updateProgramAudioSink();
     StudioRepository repository_;
     StudioProject project_;
     SceneListModel scenesModel_;
@@ -104,6 +121,8 @@ private:
     VisualSourceManager visualSources_;
     AudioInputManager audioSources_;
     LocalRecorder recorder_;
+    StreamingOutput streamer_;
     ProgramRenderEngine programEngine_;
     QString statusMessage_;
+    QString streamKey_;
 };

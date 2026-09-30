@@ -84,6 +84,11 @@ StudioProject StudioRepository::load() const
     const QJsonObject transition = root.value("transition").toObject();
     project.transition.type = transition.value("type").toString() == "Cut" ? TransitionType::Cut : TransitionType::Fade;
     project.transition.durationMs = qBound(50, transition.value("durationMs").toInt(300), 10000);
+    const QJsonObject streaming = root.value("streaming").toObject();
+    project.streamSettings.serverUrl = streaming.value("serverUrl").toString();
+    project.streamSettings.videoBitrateKbps = qBound(300, streaming.value("videoBitrateKbps").toInt(6000), 50000);
+    project.streamSettings.audioBitrateKbps = qBound(64, streaming.value("audioBitrateKbps").toInt(160), 512);
+    project.streamSettings.frameRate = qBound(1, streaming.value("frameRate").toInt(60), 60);
     if (project.profileId.isEmpty() || project.profileName.trimmed().isEmpty()) return StudioProject::createDefault();
     project.normalize();
     return project;
@@ -108,7 +113,8 @@ bool StudioRepository::save(const StudioProject &project, QString *errorMessage)
     for (const MixerChannel &channel : project.mixerChannels) {
         mixer.append(QJsonObject{{"id", channel.id}, {"name", channel.name}, {"volume", channel.volume}, {"muted", channel.muted}});
     }
-    const QJsonObject root{{"schemaVersion", StudioProject::SchemaVersion}, {"profileId", project.profileId}, {"profileName", project.profileName}, {"activeSceneId", project.activeSceneId}, {"programWidth", project.programResolution.width}, {"programHeight", project.programResolution.height}, {"sources", sources}, {"scenes", scenes}, {"mixerChannels", mixer}, {"transition", QJsonObject{{"type", project.transition.type == TransitionType::Cut ? "Cut" : "Fade"}, {"durationMs", project.transition.durationMs}}}};
+    const QJsonObject root{{"schemaVersion", StudioProject::SchemaVersion}, {"profileId", project.profileId}, {"profileName", project.profileName}, {"activeSceneId", project.activeSceneId}, {"programWidth", project.programResolution.width}, {"programHeight", project.programResolution.height}, {"sources", sources}, {"scenes", scenes}, {"mixerChannels", mixer}, {"transition", QJsonObject{{"type", project.transition.type == TransitionType::Cut ? "Cut" : "Fade"}, {"durationMs", project.transition.durationMs}}},
+                           {"streaming", QJsonObject{{"serverUrl", project.streamSettings.serverUrl}, {"videoBitrateKbps", project.streamSettings.videoBitrateKbps}, {"audioBitrateKbps", project.streamSettings.audioBitrateKbps}, {"frameRate", project.streamSettings.frameRate}}}};
     QSaveFile file(filePath());
     if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0 || !file.commit()) { if (errorMessage) *errorMessage = file.errorString(); return false; }
     return true;

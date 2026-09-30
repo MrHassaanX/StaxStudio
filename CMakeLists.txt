@@ -55,6 +55,10 @@ qt_add_executable(StaxStudio
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/streaming/StreamingOutput.cpp
+    core/streaming/StreamingOutput.h
+    core/streaming/StreamingTypes.cpp
+    core/streaming/StreamingTypes.h
     core/project/StudioProject.cpp
     core/project/StudioProject.h
     core/project/StudioRepository.cpp
@@ -209,6 +213,10 @@ qt_add_executable(StaxStudioTests
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/streaming/StreamingOutput.cpp
+    core/streaming/StreamingOutput.h
+    core/streaming/StreamingTypes.cpp
+    core/streaming/StreamingTypes.h
     core/audio/AudioInputManager.cpp
     core/audio/AudioInputManager.h
     core/audio/wasapi/WasapiAudioSource.cpp
@@ -255,6 +263,10 @@ qt_add_executable(StaxStudioUiTests
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/streaming/StreamingOutput.cpp
+    core/streaming/StreamingOutput.h
+    core/streaming/StreamingTypes.cpp
+    core/streaming/StreamingTypes.h
     core/capture/CaptureTypes.cpp
     core/capture/VisualSourceManager.cpp
     core/capture/windows/DxgiDesktopCapture.cpp

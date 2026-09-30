@@ -12,6 +12,7 @@
 #include <thread>
 
 class LocalRecorder;
+class StreamingOutput;
 
 // Owns the authoritative offscreen program target. Its clock and D3D11 device
 // continue running when Qt Quick has no visible window or preview item.
@@ -24,6 +25,7 @@ public:
     void updateSourceFrame(const QString &sourceId, const QImage &image, qint64 timestampNs);
     void updateTransform(const QString &itemId, const QVariantMap &transform);
     void setRecorder(LocalRecorder *recorder);
+    void setStreamer(StreamingOutput *streamer);
     void setAudioDiagnosticsProvider(std::function<QVariantMap()> provider);
     [[nodiscard]] QSize programSize() const;
     [[nodiscard]] quint64 renderedFrames() const;
@@ -41,6 +43,7 @@ private:
     QHash<QString, Item> items_;
     QSize programSize_{1920, 1080};
     LocalRecorder *recorder_ = nullptr;
+    StreamingOutput *streamer_ = nullptr;
     std::function<QVariantMap()> audioDiagnosticsProvider_;
     std::jthread worker_;
     std::jthread monitor_;

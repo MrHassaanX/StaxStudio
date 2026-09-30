@@ -22,7 +22,7 @@ StudioController::StudioController(QObject *parent)
 
 StudioController::StudioController(const QString &storageDirectory, QObject *parent)
     : QObject(parent), repository_(storageDirectory), project_(repository_.load()), scenesModel_(&project_, this),
-      sceneItemsModel_(&project_, &selectedItemId_, this), mixerModel_(&project_, this), visualSources_(this), audioSources_(this), recorder_(this),
+      sceneItemsModel_(&project_, &selectedItemId_, this), mixerModel_(&project_, this), visualSources_(this), audioSources_(this), recorder_(this), streamer_(this),
       statusMessage_(QStringLiteral("Studio setup is saved locally. Media capture is not connected yet."))
 {
     dockLayout_ = new DockLayout(storageDirectory, this);
@@ -36,6 +36,7 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
     connect(&audioSources_, &AudioInputManager::metersChanged, this, [this] { for (const MixerChannel &channel : project_.mixerChannels) mixerModel_.setLevel(channel.id, audioSources_.levelDb(channel.id)); });
     visualSources_.synchronizeSources(project_.sources);
     programEngine_.setRecorder(&recorder_);
+    programEngine_.setStreamer(&streamer_);
     programEngine_.setAudioDiagnosticsProvider([this] { return audioSources_.diagnostics(); });
     programEngine_.setScene(compositorLayers(), project_.programResolution.size());
     audioSources_.synchronizeSources(project_.sources);
@@ -46,11 +47,17 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
             ? QStringLiteral("Recording error: %1").arg(recorder_.errorMessage())
             : state == QStringLiteral("Recording") ? QStringLiteral("Recording to %1").arg(recorder_.outputPath())
             : QStringLiteral("Recorder %1").arg(state.toLower());
-        if (recorder_.state() == RecordingState::Recording) {
-            audioSources_.setRecordingSink([this](ProgramMixedAudioBlock block) { recorder_.submitProgramAudio(std::move(block)); });
-        } else {
-            audioSources_.setRecordingSink({});
-        }
+        updateProgramAudioSink();
+        emit statusMessageChanged();
+        emit projectChanged();
+    });
+    connect(&streamer_, &StreamingOutput::stateChanged, this, [this] {
+        const QString state = streamer_.stateName();
+        statusMessage_ = streamer_.state() == StreamingState::Error
+            ? QStringLiteral("Streaming error: %1").arg(streamer_.errorMessage())
+            : state == QStringLiteral("Live") ? QStringLiteral("Streaming live")
+            : QStringLiteral("Streamer %1").arg(state.toLower());
+        updateProgramAudioSink();
         emit statusMessageChanged();
         emit projectChanged();
     });
@@ -104,7 +111,13 @@ QVariantList StudioController::compositorLayers() const
 }
 QString StudioController::statusMessage() const { return statusMessage_; }
 QObject *StudioController::recorder() { return &recorder_; }
+QObject *StudioController::streamer() { return &streamer_; }
 QObject *StudioController::programEngine() { return &programEngine_; }
+QString StudioController::streamServerUrl() const { return project_.streamSettings.serverUrl; }
+QString StudioController::streamKey() const { return streamKey_; }
+int StudioController::streamVideoBitrateKbps() const { return project_.streamSettings.videoBitrateKbps; }
+int StudioController::streamAudioBitrateKbps() const { return project_.streamSettings.audioBitrateKbps; }
+int StudioController::streamFrameRate() const { return project_.streamSettings.frameRate; }
 
 void StudioController::addScene(const QString &name)
 {
@@ -277,17 +290,51 @@ void StudioController::toggleRecording()
 {
     if (recorder_.state() == RecordingState::Recording || recorder_.state() == RecordingState::Starting || recorder_.state() == RecordingState::Stopping) {
         audioSources_.flushRecordingSink();
-        audioSources_.setRecordingSink({});
         recorder_.setProgramDiagnostics(programEngine_.diagnostics());
         recorder_.stop();
+        updateProgramAudioSink();
         return;
     }
     RecordingSettings settings;
     audioSources_.discardPendingBlocks();
-    audioSources_.setRecordingSink({});
+    updateProgramAudioSink();
     if (!recorder_.start(settings, {project_.programResolution.width, project_.programResolution.height})) {
         statusMessage_ = QStringLiteral("Unable to start the recorder.");
         emit statusMessageChanged();
+    } else {
+        updateProgramAudioSink();
+    }
+}
+
+void StudioController::setStreamConfiguration(const QString &serverUrl, const QString &streamKey, const int videoBitrateKbps, const int audioBitrateKbps, const int frameRate)
+{
+    project_.streamSettings.serverUrl = serverUrl.trimmed();
+    project_.streamSettings.videoBitrateKbps = qBound(300, videoBitrateKbps, 50000);
+    project_.streamSettings.audioBitrateKbps = qBound(64, audioBitrateKbps, 512);
+    project_.streamSettings.frameRate = qBound(1, frameRate, 60);
+    streamKey_ = streamKey;
+    save();
+    emit streamKeyChanged();
+    emit projectChanged();
+}
+
+void StudioController::toggleStreaming()
+{
+    const StreamingState state = streamer_.state();
+    if (state == StreamingState::Connecting || state == StreamingState::Live || state == StreamingState::Reconnecting || state == StreamingState::Stopping) {
+        streamer_.stop();
+        updateProgramAudioSink();
+        return;
+    }
+    StreamSettings settings = project_.streamSettings;
+    settings.streamKey = streamKey_;
+    audioSources_.discardPendingBlocks();
+    updateProgramAudioSink();
+    if (!streamer_.start(settings, {project_.programResolution.width, project_.programResolution.height})) {
+        statusMessage_ = QStringLiteral("Unable to start streaming.");
+        emit statusMessageChanged();
+    } else {
+        updateProgramAudioSink();
     }
 }
 
@@ -306,4 +353,20 @@ void StudioController::save()
 {
     QString error;
     if (!repository_.save(project_, &error)) { statusMessage_ = QStringLiteral("Unable to save studio changes: %1").arg(error); emit statusMessageChanged(); }
+}
+
+void StudioController::updateProgramAudioSink()
+{
+    const bool recording = recorder_.state() == RecordingState::Recording;
+    const bool streaming = streamer_.isAcceptingInput();
+    if (!recording && !streaming) {
+        audioSources_.setRecordingSink({});
+        return;
+    }
+    audioSources_.setRecordingSink([this](ProgramMixedAudioBlock block) {
+        if (recorder_.state() == RecordingState::Recording)
+            recorder_.submitProgramAudio({block.audio});
+        if (streamer_.isAcceptingInput())
+            streamer_.submitProgramAudio(std::move(block));
+    });
 }

@@ -4,165 +4,177 @@ import QtQuick.Layouts
 import "components"
 
 Item {
+    id: root
     anchors.fill: parent
 
-    Column {
-        anchors {
-            fill: parent
-            margins: 52
-        }
-        spacing: 0
+    function formatElapsed(ms) {
+        const seconds = Math.floor(ms / 1000)
+        const hours = Math.floor(seconds / 3600)
+        const minutes = Math.floor((seconds % 3600) / 60)
+        const remainder = seconds % 60
+        return (hours < 10 ? "0" : "") + hours + ":" + (minutes < 10 ? "0" : "") + minutes + ":" + (remainder < 10 ? "0" : "") + remainder
+    }
 
-        Text {
-            text: "Stream"
-            color: "#13202A"
-            font.pixelSize: 30
-            font.weight: Font.DemiBold
-        }
+    function saveSettings() {
+        studioController.setStreamConfiguration(serverField.text, keyField.text,
+                                                parseInt(videoBitrateField.text || "6000"),
+                                                parseInt(audioBitrateField.text || "160"),
+                                                parseInt(fpsBox.currentText || "60"))
+    }
 
-        Item {
-            width: 1
-            height: 10
-        }
+    Rectangle { anchors.fill: parent; color: "#0F171A" }
 
-        Text {
-            text: "Prepare a live destination and session profile."
-            color: "#60717A"
-            font.pixelSize: 15
-        }
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 28
+        spacing: 14
 
-        Item {
-            width: 1
-            height: 30
+        RowLayout {
+            Layout.fillWidth: true
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+                Text { text: "Stream Setup"; color: "#F5F8F8"; font.pixelSize: 24; font.weight: Font.DemiBold }
+                Text { text: "Configure a Custom RTMP destination for the program output."; color: "#829399"; font.pixelSize: 12 }
+            }
+            Rectangle {
+                Layout.preferredWidth: 170
+                Layout.preferredHeight: 38
+                radius: 5
+                color: studioController.streamer.state === "Live" ? "#2E4D3B" : "#172328"
+                border.color: studioController.streamer.state === "Live" ? "#8AAC7D" : "#2F4148"
+                Row {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
+                    Rectangle {
+                        width: 8; height: 8; radius: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: studioController.streamer.state === "Live" ? "#B7E65C" : "#73878D"
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: studioController.streamer.state === "Live" ? "LIVE  " + root.formatElapsed(studioController.streamer.elapsedMs) : studioController.streamer.state
+                        color: "#EAF0F1"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+                }
+            }
         }
 
         RowLayout {
-            width: parent.width
-            spacing: 18
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 14
 
-            Rectangle {
+            StudioPanel {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 292
-                radius: 8
-                color: "#FFFFFF"
-                border.color: "#E1E7E9"
-
-                Column {
-                    anchors {
-                        fill: parent
-                        margins: 28
-                    }
+                Layout.fillHeight: true
+                contentMargin: 18
+                ColumnLayout {
+                    anchors.fill: parent
                     spacing: 12
+                    StudioSectionHeader { title: "Custom RTMP"; subtitle: "Server URL is saved. Stream key stays session-only for now." }
 
-                    Text {
-                        text: "Destination"
-                        color: "#13202A"
-                        font.pixelSize: 17
-                        font.weight: Font.DemiBold
+                    Text { text: "Server"; color: "#B6C6C9"; font.pixelSize: 12 }
+                    StudioTextField {
+                        id: serverField
+                        Layout.fillWidth: true
+                        placeholderText: "rtmp://server/app"
+                        text: studioController.streamServerUrl
                     }
 
-                    Text {
-                        text: "No live destination is connected."
-                        color: "#73828A"
-                        font.pixelSize: 14
+                    Text { text: "Stream Key"; color: "#B6C6C9"; font.pixelSize: 12 }
+                    StudioTextField {
+                        id: keyField
+                        Layout.fillWidth: true
+                        placeholderText: "Paste stream key"
+                        text: studioController.streamKey
+                        echoMode: TextInput.Password
                     }
 
-                    StudioComboBox {
-                        width: parent.width
-                        model: ["Custom RTMP", "YouTube", "Twitch"]
-                    }
-
-                    Item {
-                        width: 1
-                        height: 8
-                    }
-
-                    Text {
-                        text: "Output"
-                        color: "#13202A"
-                        font.pixelSize: 15
-                        font.weight: Font.DemiBold
-                    }
-
-                    Row {
-                        spacing: 10
-
-                        Rectangle {
-                            width: 102
-                            height: 34
-                            radius: 5
-                            color: "#EEF5F4"
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "1080p"
-                                color: "#246A60"
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                            }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        rowSpacing: 10
+                        columnSpacing: 12
+                        Text { text: "Video Bitrate"; color: "#B6C6C9"; font.pixelSize: 12 }
+                        StudioTextField {
+                            id: videoBitrateField
+                            Layout.fillWidth: true
+                            text: studioController.streamVideoBitrateKbps.toString()
+                            validator: IntValidator { bottom: 300; top: 50000 }
+                            inputMethodHints: Qt.ImhDigitsOnly
                         }
+                        Text { text: "Audio Bitrate"; color: "#B6C6C9"; font.pixelSize: 12 }
+                        StudioTextField {
+                            id: audioBitrateField
+                            Layout.fillWidth: true
+                            text: studioController.streamAudioBitrateKbps.toString()
+                            validator: IntValidator { bottom: 64; top: 512 }
+                            inputMethodHints: Qt.ImhDigitsOnly
+                        }
+                        Text { text: "FPS"; color: "#B6C6C9"; font.pixelSize: 12 }
+                        StudioComboBox {
+                            id: fpsBox
+                            Layout.fillWidth: true
+                            model: ["30", "60"]
+                            currentIndex: studioController.streamFrameRate <= 30 ? 0 : 1
+                        }
+                    }
 
-                        Rectangle {
-                            width: 84
-                            height: 34
-                            radius: 5
-                            color: "#F1F3F5"
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "6 Mbps"
-                                color: "#4D5B63"
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                            }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Item { Layout.fillWidth: true }
+                        StudioButton { text: "Save Settings"; onClicked: root.saveSettings() }
+                        StudioButton {
+                            text: studioController.streamer.state === "Live" || studioController.streamer.state === "Connecting" || studioController.streamer.state === "Reconnecting"
+                                  ? "Stop Streaming" : "Start Streaming"
+                            enabled: studioController.streamer.state !== "Stopping"
+                            onClicked: { root.saveSettings(); studioController.toggleStreaming() }
                         }
                     }
                 }
             }
 
-            Rectangle {
-                Layout.preferredWidth: 254
-                Layout.preferredHeight: 292
-                radius: 8
-                color: "#163B3E"
-
-                Column {
-                    anchors {
-                        fill: parent
-                        margins: 28
-                    }
-                    spacing: 12
-
+            StudioPanel {
+                Layout.preferredWidth: 300
+                Layout.fillHeight: true
+                contentMargin: 18
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    StudioSectionHeader { title: "Status"; subtitle: studioController.streamer.state === "Live" ? "RTMP output is live" : "RTMP output is offline" }
+                    Text { Layout.fillWidth: true; text: studioController.streamer.state; color: "#EAF0F1"; font.pixelSize: 18; font.weight: Font.DemiBold }
+                    Text { Layout.fillWidth: true; text: studioController.streamer.state === "Live" ? root.formatElapsed(studioController.streamer.elapsedMs) : "00:00:00"; color: "#B7E65C"; font.pixelSize: 13; font.weight: Font.DemiBold }
                     Text {
-                        text: "Live status"
-                        color: "#FFFFFF"
-                        font.pixelSize: 17
-                        font.weight: Font.DemiBold
+                        Layout.fillWidth: true
+                        visible: studioController.streamer.errorMessage.length > 0
+                        text: studioController.streamer.errorMessage
+                        color: "#E7B17B"
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
                     }
-
-                    Rectangle {
-                        width: 10
-                        height: 10
-                        radius: 5
-                        color: "#7C9C9B"
-                    }
-
                     Text {
-                        text: "Offline"
-                        color: "#C1D3D1"
-                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                        text: "Bitrate: " + (studioController.streamer.diagnostics.estimatedBitrateKbps || 0) + " Kbps"
+                        color: "#9BAEB2"
+                        font.pixelSize: 11
                     }
-
-                    Item {
-                        width: 1
-                        height: 58
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Dropped frames: " + (studioController.streamer.diagnostics.droppedStreamFrames || 0)
+                        color: "#9BAEB2"
+                        font.pixelSize: 11
                     }
-
-                    Button {
-                        width: parent.width
-                        text: "Go live"
-                        enabled: false
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Reconnects: " + (studioController.streamer.diagnostics.reconnectCount || 0)
+                        color: "#9BAEB2"
+                        font.pixelSize: 11
                     }
+                    Item { Layout.fillHeight: true }
                 }
             }
         }

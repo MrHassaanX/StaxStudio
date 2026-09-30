@@ -7,6 +7,8 @@
 #include "core/render/CompositorScene.h"
 #include "core/render/ProgramFrameMath.h"
 #include "core/recorder/LocalRecorder.h"
+#include "core/streaming/StreamingOutput.h"
+#include "core/streaming/StreamingTypes.h"
 #include "ui/controllers/StudioModels.h"
 #include "ui/controllers/DockLayout.h"
 
@@ -39,6 +41,10 @@ private slots:
     void keepsModelsConsistentThroughRepeatedLifecycleChanges();
     void normalizesAudioBlocks();
     void programMixerAlignsAndBoundsSources();
+    void streamsThroughMockLifecycle();
+    void streamFailureAndRedactionStayIsolated();
+    void boundsStreamingQueues();
+    void persistsStreamSettingsWithoutStreamKey();
     void recordsSimultaneousProgramAudio_data();
     void recordsSimultaneousProgramAudio();
     void optionalWasapiEndpointProbe();
@@ -86,6 +92,97 @@ void StudioProjectTests::programMixerAlignsAndBoundsSources()
     for(int i=0;i<480;++i) {surround.samples[i*3]=0.2f;surround.samples[i*3+1]=0.3f;surround.samples[i*3+2]=0.9f;}
     mixer.push("existing-front-channel-mapping",std::move(surround));
     mixer.produceUntil(10'000'000,[&](auto block){QCOMPARE(block.audio.samples[0],0.2f);QCOMPARE(block.audio.samples[1],0.3f);});
+}
+
+void StudioProjectTests::streamsThroughMockLifecycle()
+{
+    StreamingOutput stream;
+    StreamSettings settings;
+    settings.serverUrl = QStringLiteral("staxmock://success");
+    settings.streamKey = QStringLiteral("secret-key");
+    settings.frameRate = 30;
+    QVERIFY(stream.start(settings, {32, 32}));
+    QTRY_COMPARE(stream.state(), StreamingState::Live);
+    QImage image(32, 32, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    stream.submitVideoFrame({image, 0});
+    stream.submitProgramAudio({{0, 48000, 2, QVector<float>(960, 0.1f)}});
+    QTRY_VERIFY(stream.diagnostics().value("encodedVideoFrames").toULongLong() >= 1);
+    QTRY_VERIFY(stream.diagnostics().value("encodedAudioFrames").toULongLong() >= 1);
+    stream.stop();
+    QTRY_COMPARE(stream.state(), StreamingState::Idle);
+    QVERIFY(stream.start(settings, {32, 32}));
+    QTRY_COMPARE(stream.state(), StreamingState::Live);
+    stream.stop();
+    QTRY_COMPARE(stream.state(), StreamingState::Idle);
+}
+
+void StudioProjectTests::streamFailureAndRedactionStayIsolated()
+{
+    StreamSettings settings;
+    settings.serverUrl = QStringLiteral("rtmp://example.invalid/live");
+    settings.streamKey = QStringLiteral("super-secret");
+    QCOMPARE(redactedStreamUrl(settings), QStringLiteral("rtmp://example.invalid/live/<stream-key>"));
+
+    StreamingOutput stream;
+    StreamSettings failing = settings;
+    failing.serverUrl = QStringLiteral("staxmock://fail");
+    failing.maxReconnectAttempts = 1;
+    QVERIFY(stream.start(failing, {32, 32}));
+    QTRY_COMPARE(stream.state(), StreamingState::Error);
+    QVERIFY(stream.diagnostics().value("reconnectCount").toULongLong() >= 1);
+    QVERIFY(!QJsonDocument::fromVariant(stream.diagnostics()).toJson(QJsonDocument::Compact).contains("super-secret"));
+
+    StreamingOutput live;
+    StreamSettings ok = settings;
+    ok.serverUrl = QStringLiteral("staxmock://success");
+    QVERIFY(live.start(ok, {32, 32}));
+    QTRY_COMPARE(live.state(), StreamingState::Live);
+    live.fail(QStringLiteral("write failed for super-secret"));
+    QTRY_COMPARE(live.state(), StreamingState::Error);
+    QVERIFY(!live.errorMessage().contains(QStringLiteral("super-secret")));
+}
+
+void StudioProjectTests::boundsStreamingQueues()
+{
+    StreamingOutput stream;
+    StreamSettings settings;
+    settings.serverUrl = QStringLiteral("staxmock://slow");
+    QVERIFY(stream.start(settings, {16, 16}));
+    QTRY_COMPARE(stream.state(), StreamingState::Live);
+    QImage image(16, 16, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    for (int i = 0; i < 200; ++i)
+        stream.submitVideoFrame({image, i * 16'666'666LL});
+    for (int i = 0; i < 700; ++i)
+        stream.submitProgramAudio({{i * 10'000'000LL, 48000, 2, QVector<float>(960, 0.05f)}});
+    QTRY_VERIFY(stream.diagnostics().value("droppedStreamFrames").toULongLong() > 0);
+    QVERIFY(stream.diagnostics().value("queuedVideoFrames").toULongLong() <= 3);
+    QVERIFY(stream.diagnostics().value("queuedAudioBlocks").toULongLong() <= 256);
+    stream.stop();
+}
+
+void StudioProjectTests::persistsStreamSettingsWithoutStreamKey()
+{
+    QTemporaryDir directory;
+    StudioRepository repository(directory.path());
+    StudioProject project = StudioProject::createDefault();
+    project.streamSettings.serverUrl = QStringLiteral("rtmp://localhost/live");
+    project.streamSettings.streamKey = QStringLiteral("do-not-save");
+    project.streamSettings.videoBitrateKbps = 4500;
+    project.streamSettings.audioBitrateKbps = 128;
+    project.streamSettings.frameRate = 30;
+    QVERIFY(repository.save(project));
+    QFile file(repository.filePath());
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray saved = file.readAll();
+    QVERIFY(!saved.contains("do-not-save"));
+    StudioProject restored = repository.load();
+    QCOMPARE(restored.streamSettings.serverUrl, QStringLiteral("rtmp://localhost/live"));
+    QCOMPARE(restored.streamSettings.videoBitrateKbps, 4500);
+    QCOMPARE(restored.streamSettings.audioBitrateKbps, 128);
+    QCOMPARE(restored.streamSettings.frameRate, 30);
+    QVERIFY(restored.streamSettings.streamKey.isEmpty());
 }
 
 void StudioProjectTests::recordsSimultaneousProgramAudio_data()

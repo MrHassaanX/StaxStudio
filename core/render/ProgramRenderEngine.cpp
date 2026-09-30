@@ -5,6 +5,7 @@
 #include "core/recorder/LocalRecorder.h"
 #include "core/recorder/RecordingTypes.h"
 #include "core/render/ProgramFrameMath.h"
+#include "core/streaming/StreamingOutput.h"
 #include "D3DProgramSurface.h"
 #include <QJsonDocument>
 
@@ -171,6 +172,12 @@ void ProgramRenderEngine::setRecorder(LocalRecorder *recorder)
     QMutexLocker lock(&mutex_);
     recorder_ = recorder;
 }
+
+void ProgramRenderEngine::setStreamer(StreamingOutput *streamer)
+{
+    QMutexLocker lock(&mutex_);
+    streamer_ = streamer;
+}
 void ProgramRenderEngine::setAudioDiagnosticsProvider(std::function<QVariantMap()> provider)
 {
     QMutexLocker lock(&mutex_);
@@ -213,8 +220,10 @@ void ProgramRenderEngine::run()
     try {
         while (running_) {
             LocalRecorder *recorder;
-            { QMutexLocker lock(&mutex_); recorder = recorder_; }
-            if ((recorder && recorder->state() == RecordingState::Recording) || lastPreviewRequestNs_ > 0) break;
+            StreamingOutput *streamer;
+            { QMutexLocker lock(&mutex_); recorder = recorder_; streamer = streamer_; }
+            if ((recorder && recorder->state() == RecordingState::Recording)
+                || (streamer && streamer->isAcceptingInput()) || lastPreviewRequestNs_ > 0) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         if (!running_) return;
@@ -240,14 +249,17 @@ void ProgramRenderEngine::run()
             QSize size;
             QVector<Item> layers;
             LocalRecorder *recorder;
+            StreamingOutput *streamer;
             {
                 QMutexLocker lock(&mutex_);
-                size=programSize_; recorder=recorder_;
+                size=programSize_; recorder=recorder_; streamer=streamer_;
                 for (auto it=items_.cbegin();it!=items_.cend();++it) layers.append(it.value());
             }
             const bool recording=recorder && recorder->state()==RecordingState::Recording;
+            const bool streaming=streamer && streamer->isAcceptingInput();
             const bool preview=mediaTimestampNs()-lastPreviewRequestNs_.load()<500'000'000LL;
-            const int fps=recording ? recorder->frameRate() : 60;
+            const int streamFps = streaming ? streamer->diagnostics().value(QStringLiteral("frameRate"), 60).toInt() : 60;
+            const int fps=recording ? recorder->frameRate() : (streaming ? streamFps : 60);
             if (previousFps!=fps) { epoch=Clock::now(); scheduleOriginNs=mediaTimestampNs(); tick=0; previousFps=fps; }
             stage_=2;
             const auto deadline=epoch+std::chrono::nanoseconds(recordingFrameTimestampNs(tick,fps));
@@ -265,7 +277,8 @@ void ProgramRenderEngine::run()
             const qint64 scheduledTimestamp=scheduleOriginNs+recordingFrameTimestampNs(tick-1,fps);
             const qint64 workStarted=mediaTimestampNs();
             if(!running_) break;
-            if(!recording && !preview) continue;
+            const bool outputActive = recording || streaming;
+            if(!outputActive && !preview) continue;
             if(!size.isValid()) continue;
             if(size!=gpu.size) {
                 stage_=3;
@@ -275,18 +288,20 @@ void ProgramRenderEngine::run()
                 sharedHandle_=gpu.sharedHandle;
                 ++generation_;
             }
-            if(recording && recordingEpoch<0) {
+            if(outputActive && recordingEpoch<0) {
                 recordingEpoch=mediaTimestampNs();
                 for(auto &slot:gpu.readbacks) slot.timestamp=-1;
             }
-            if(!recording) {
+            if(!outputActive) {
                 recordingEpoch=-1;
                 for(auto &slot:gpu.readbacks) slot.timestamp=-1;
             }
             stage_=4;
             const qint64 readbackStarted=mediaTimestampNs();
-            if(recording) gpu.drain([&](QImage image,qint64 timestamp) {
-                recorder->submitVideoFrame({std::move(image),timestamp}); ++submittedFrames_; lastSubmittedNs_=timestamp;
+            if(outputActive) gpu.drain([&](QImage image,qint64 timestamp) {
+                if(recording) recorder->submitVideoFrame({image,timestamp});
+                if(streaming) streamer->submitVideoFrame({std::move(image),timestamp});
+                ++submittedFrames_; lastSubmittedNs_=timestamp;
             });
             readbackWorkNs_=mediaTimestampNs()-readbackStarted;
             qint64 captureTime=0;
@@ -341,7 +356,7 @@ void ProgramRenderEngine::run()
             }
             ++renderedFrames_;
             lastRenderNs_=mediaTimestampNs();
-            if(recording) {
+            if(outputActive) {
                 stage_=8;
                 ++requestedFrames_;
                 if(!gpu.enqueue(scheduledTimestamp)) ++readbackDrops_;
@@ -365,6 +380,7 @@ void ProgramRenderEngine::run()
         qCritical() << "Program output failed:" << error.what();
         QMutexLocker lock(&mutex_);
         if(recorder_) recorder_->fail(QString::fromUtf8(error.what()));
+        if(streamer_) streamer_->fail(QString::fromUtf8(error.what()));
     }
 #endif
 }

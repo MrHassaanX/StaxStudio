@@ -459,8 +459,19 @@ Item {
                         spacing: 8
                         RowLayout {
                             Layout.fillWidth: true
-                            StudioSectionHeader { Layout.fillWidth: true; title: ""; subtitle: studioController.recorder.state === "Recording" ? "Recording locally" : "Local recording" }
+                            StudioSectionHeader { Layout.fillWidth: true; title: ""; subtitle: studioController.streamer.state === "Live" ? "Streaming live" : (studioController.recorder.state === "Recording" ? "Recording locally" : "Outputs") }
                             Text { visible: studioController.recorder.state === "Recording" || studioController.recorder.state === "Stopping"; text: "REC  " + root.formatElapsed(studioController.recorder.elapsedMs); color: root.accent; font.pixelSize: 11; font.weight: Font.DemiBold }
+                            Text { visible: studioController.streamer.state === "Live" || studioController.streamer.state === "Reconnecting"; text: "LIVE  " + root.formatElapsed(studioController.streamer.elapsedMs); color: root.accent; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        }
+                        StudioButton {
+                            objectName: "streamingButton"
+                            Layout.fillWidth: true
+                            implicitHeight: 34
+                            text: studioController.streamer.state === "Live" || studioController.streamer.state === "Connecting" || studioController.streamer.state === "Reconnecting" ? "Stop streaming" : "Start streaming"
+                            enabled: studioController.streamer.state !== "Stopping"
+                            onClicked: studioController.toggleStreaming()
+                            ToolTip.visible: hovered
+                            ToolTip.text: studioController.streamer.state === "Error" ? studioController.streamer.errorMessage : "Stream the program to the Custom RTMP destination."
                         }
                         StudioButton { objectName: "recordingButton"; Layout.fillWidth: true; implicitHeight: 34; text: studioController.recorder.state === "Recording" ? "Stop recording" : "Start recording"; enabled: studioController.recorder.state !== "Starting" && studioController.recorder.state !== "Stopping"; onClicked: studioController.toggleRecording(); ToolTip.visible: hovered; ToolTip.text: studioController.recorder.state === "Error" ? studioController.recorder.errorMessage : "Record the program locally as an MKV file." }
                     }
