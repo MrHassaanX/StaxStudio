@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/audio/mixer/MixerChannel.h"
+#include "core/platform/PlatformTypes.h"
 #include "core/render/ProgramResolution.h"
 #include "core/scene/Scene.h"
 #include "core/source/Source.h"
@@ -26,6 +27,8 @@ public:
     ProgramResolution programResolution = ProgramResolution::hd1080();
     TransitionSettings transition;
     StreamSettings streamSettings;
+    QString activeStreamDestinationId;
+    QVector<StreamDestination> streamDestinations;
 
     [[nodiscard]] const Scene *activeScene() const;
     [[nodiscard]] Scene *activeScene();

@@ -6,6 +6,16 @@ import "components"
 Item {
     id: root
     anchors.fill: parent
+    property var destinations: studioController.streamingProviders()
+    property string selectedProvider: studioController.activeStreamProvider
+
+    Connections {
+        target: studioController
+        function onProjectChanged() {
+            root.destinations = studioController.streamingProviders()
+            root.selectedProvider = studioController.activeStreamProvider
+        }
+    }
 
     function formatElapsed(ms) {
         const seconds = Math.floor(ms / 1000)
@@ -35,7 +45,7 @@ Item {
                 Layout.fillWidth: true
                 spacing: 2
                 Text { text: "Stream Setup"; color: "#F5F8F8"; font.pixelSize: 24; font.weight: Font.DemiBold }
-                Text { text: "Configure a Custom RTMP destination for the program output."; color: "#829399"; font.pixelSize: 12 }
+                Text { text: "Choose where StaxStudio should send the program output."; color: "#829399"; font.pixelSize: 12 }
             }
             Rectangle {
                 Layout.preferredWidth: 170
@@ -63,6 +73,63 @@ Item {
             }
         }
 
+        StudioPanel {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 120
+            contentMargin: 14
+            RowLayout {
+                anchors.fill: parent
+                spacing: 10
+                Repeater {
+                    model: root.destinations
+                    delegate: Rectangle {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: 6
+                        color: modelData.selected ? "#213B32" : "#142025"
+                        border.color: modelData.selected ? "#8AAC7D" : "#2F4148"
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 6
+                            Row {
+                                spacing: 8
+                                Rectangle {
+                                    width: 8; height: 8; radius: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: modelData.connected ? "#B7E65C" : "#73878D"
+                                }
+                                Text {
+                                    text: modelData.label
+                                    color: "#F0F6F6"
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                    width: parent.parent.width - 36
+                                }
+                            }
+                            Text {
+                                width: parent.width
+                                text: modelData.accountName && modelData.accountName.length > 0 ? modelData.accountName : (modelData.connected ? "Ready" : "Not connected")
+                                color: "#93A8AC"
+                                font.pixelSize: 11
+                                elide: Text.ElideRight
+                            }
+                            Item { height: 1; width: 1 }
+                            StudioButton {
+                                width: parent.width
+                                implicitHeight: 28
+                                text: modelData.selected ? "Selected" : "Select"
+                                checked: modelData.selected
+                                onClicked: studioController.selectStreamDestination(modelData.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -75,27 +142,46 @@ Item {
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 12
-                    StudioSectionHeader { title: "Custom RTMP"; subtitle: "Server URL is saved. Stream key stays session-only for now." }
+                    StudioSectionHeader {
+                        title: root.selectedProvider === "custom-rtmp" ? "Custom RTMP" : (root.selectedProvider === "youtube" ? "YouTube" : (root.selectedProvider === "twitch" ? "Twitch" : "Kick"))
+                        subtitle: root.selectedProvider === "custom-rtmp" ? "Server URL is saved. Stream key stays session-only for now." : "Account OAuth, secure credential storage, and provider request models are staged for this provider."
+                    }
 
-                    Text { text: "Server"; color: "#B6C6C9"; font.pixelSize: 12 }
+                    Text { visible: root.selectedProvider === "custom-rtmp"; text: "Server"; color: "#B6C6C9"; font.pixelSize: 12 }
                     StudioTextField {
                         id: serverField
+                        visible: root.selectedProvider === "custom-rtmp"
                         Layout.fillWidth: true
                         placeholderText: "rtmp://server/app"
                         text: studioController.streamServerUrl
                     }
 
-                    Text { text: "Stream Key"; color: "#B6C6C9"; font.pixelSize: 12 }
+                    Text { visible: root.selectedProvider === "custom-rtmp"; text: "Stream Key"; color: "#B6C6C9"; font.pixelSize: 12 }
                     StudioTextField {
                         id: keyField
+                        visible: root.selectedProvider === "custom-rtmp"
                         Layout.fillWidth: true
                         placeholderText: "Paste stream key"
                         text: studioController.streamKey
                         echoMode: TextInput.Password
                     }
 
+                    Text {
+                        visible: root.selectedProvider !== "custom-rtmp"
+                        Layout.fillWidth: true
+                        color: "#A7B7BA"
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        text: root.selectedProvider === "youtube"
+                              ? "YouTube supports title, description, privacy, category, thumbnail, made-for-kids, DVR, latency, scheduling, auto-start, and auto-stop through the provider model."
+                              : (root.selectedProvider === "twitch"
+                                 ? "Twitch supports title, category/game, tags, language, and stream-key access through official scopes where authorized."
+                                 : "Kick supports channel identity, title, category, and channel metadata exposed by the official API.")
+                    }
+
                     GridLayout {
                         Layout.fillWidth: true
+                        visible: root.selectedProvider === "custom-rtmp"
                         columns: 2
                         rowSpacing: 10
                         columnSpacing: 12

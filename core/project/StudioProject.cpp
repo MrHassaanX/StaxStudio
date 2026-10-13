@@ -4,6 +4,7 @@
 #include <QSet>
 #include <QtMath>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -60,6 +61,11 @@ StudioProject StudioProject::createDefault()
     project.addScene(QStringLiteral("Starting Soon"));
     project.addScene(QStringLiteral("BRB"));
     project.activeSceneId = project.scenes.first().id;
+    project.streamDestinations = {defaultDestination(PlatformProviderId::CustomRtmp),
+                                  defaultDestination(PlatformProviderId::YouTube),
+                                  defaultDestination(PlatformProviderId::Twitch),
+                                  defaultDestination(PlatformProviderId::Kick)};
+    project.activeStreamDestinationId = project.streamDestinations.first().id;
     return project;
 }
 
@@ -341,4 +347,23 @@ void StudioProject::normalize()
         channels.append(channel);
     }
     mixerChannels = std::move(channels);
+    QSet<QString> providers;
+    for (StreamDestination &destination : streamDestinations) {
+        providers.insert(platformProviderName(destination.provider));
+        if (destination.id.isEmpty()) destination.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (destination.displayName.trimmed().isEmpty()) destination.displayName = platformProviderLabel(destination.provider);
+        destination.configuration.remove(QStringLiteral("streamKey"));
+        destination.configuration.remove(QStringLiteral("accessToken"));
+        destination.configuration.remove(QStringLiteral("refreshToken"));
+        if (destination.provider == PlatformProviderId::CustomRtmp) {
+            destination.configuration.insert(QStringLiteral("serverUrl"), streamSettings.serverUrl);
+            destination.connected = true;
+        }
+    }
+    for (PlatformProviderId provider : {PlatformProviderId::CustomRtmp, PlatformProviderId::YouTube, PlatformProviderId::Twitch, PlatformProviderId::Kick}) {
+        if (!providers.contains(platformProviderName(provider))) streamDestinations.append(defaultDestination(provider));
+    }
+    if (activeStreamDestinationId.isEmpty()
+        || std::none_of(streamDestinations.cbegin(), streamDestinations.cend(), [&](const StreamDestination &destination) { return destination.id == activeStreamDestinationId; }))
+        activeStreamDestinationId = streamDestinations.first().id;
 }

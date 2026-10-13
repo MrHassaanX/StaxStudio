@@ -55,6 +55,14 @@ qt_add_executable(StaxStudio
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/platform/CredentialStore.cpp
+    core/platform/CredentialStore.h
+    core/platform/OAuthPkce.cpp
+    core/platform/OAuthPkce.h
+    core/platform/PlatformProviders.cpp
+    core/platform/PlatformProviders.h
+    core/platform/PlatformTypes.cpp
+    core/platform/PlatformTypes.h
     core/streaming/StreamingOutput.cpp
     core/streaming/StreamingOutput.h
     core/streaming/StreamingTypes.cpp
@@ -149,6 +157,7 @@ target_link_libraries(StaxStudio
         ${STAX_FFMPEG_avutil_LIBRARY}
         ${STAX_FFMPEG_swresample_LIBRARY}
         ${STAX_FFMPEG_swscale_LIBRARY}
+        advapi32
         ole32
         uuid
 )
@@ -213,6 +222,14 @@ qt_add_executable(StaxStudioTests
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/platform/CredentialStore.cpp
+    core/platform/CredentialStore.h
+    core/platform/OAuthPkce.cpp
+    core/platform/OAuthPkce.h
+    core/platform/PlatformProviders.cpp
+    core/platform/PlatformProviders.h
+    core/platform/PlatformTypes.cpp
+    core/platform/PlatformTypes.h
     core/streaming/StreamingOutput.cpp
     core/streaming/StreamingOutput.h
     core/streaming/StreamingTypes.cpp
@@ -227,7 +244,7 @@ qt_add_executable(StaxStudioTests
 )
 
 target_include_directories(StaxStudioTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${STAX_FFMPEG_INCLUDE_DIR})
-target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} ole32 uuid propsys)
+target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} advapi32 ole32 uuid propsys)
 
 if(WIN32)
     add_custom_command(TARGET StaxStudioTests POST_BUILD
@@ -263,6 +280,14 @@ qt_add_executable(StaxStudioUiTests
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/platform/CredentialStore.cpp
+    core/platform/CredentialStore.h
+    core/platform/OAuthPkce.cpp
+    core/platform/OAuthPkce.h
+    core/platform/PlatformProviders.cpp
+    core/platform/PlatformProviders.h
+    core/platform/PlatformTypes.cpp
+    core/platform/PlatformTypes.h
     core/streaming/StreamingOutput.cpp
     core/streaming/StreamingOutput.h
     core/streaming/StreamingTypes.cpp
@@ -290,7 +315,7 @@ qt_add_shaders(StaxStudioUiTests "StaxUiTestCompositorShaders"
 )
 target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${STAX_FFMPEG_INCLUDE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} d3d11 dxgi dxguid ole32 uuid propsys)
+target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} d3d11 dxgi dxguid advapi32 ole32 uuid propsys)
 add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
 target_link_libraries(StaxStudioUiTests PRIVATE d3dcompiler)
 foreach(target StaxStudio StaxStudioTests StaxStudioUiTests)

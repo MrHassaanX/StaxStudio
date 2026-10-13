@@ -2,7 +2,13 @@
 #include "core/audio/AudioProcessing.h"
 #include "core/audio/ProgramAudioMixer.h"
 #include "core/audio/wasapi/WasapiAudioSource.h"
+#include "core/platform/CredentialStore.h"
+#include "core/platform/OAuthPkce.h"
+#include "core/platform/PlatformProviders.h"
+#include "core/platform/PlatformTypes.h"
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QUrlQuery>
 #include "core/project/StudioRepository.h"
 #include "core/render/CompositorScene.h"
 #include "core/render/ProgramFrameMath.h"
@@ -45,6 +51,12 @@ private slots:
     void streamFailureAndRedactionStayIsolated();
     void boundsStreamingQueues();
     void persistsStreamSettingsWithoutStreamKey();
+    void providerCapabilitiesReflectOfficialDifferences();
+    void generatesPkceAndRedactsSecrets();
+    void storesCredentialsBehindAbstraction();
+    void persistsDestinationsWithoutSecrets();
+    void serializesYouTubeBroadcastRequests();
+    void serializesTwitchAndKickMetadata();
     void recordsSimultaneousProgramAudio_data();
     void recordsSimultaneousProgramAudio();
     void optionalWasapiEndpointProbe();
@@ -183,6 +195,215 @@ void StudioProjectTests::persistsStreamSettingsWithoutStreamKey()
     QCOMPARE(restored.streamSettings.audioBitrateKbps, 128);
     QCOMPARE(restored.streamSettings.frameRate, 30);
     QVERIFY(restored.streamSettings.streamKey.isEmpty());
+}
+
+void StudioProjectTests::providerCapabilitiesReflectOfficialDifferences()
+{
+    const PlatformCapabilities custom = platformCapabilities(PlatformProviderId::CustomRtmp);
+    QVERIFY(custom.supportsStreamKey);
+    QVERIFY(!custom.supportsOAuth);
+    QVERIFY(!custom.supportsPrivacy);
+
+    const PlatformCapabilities youtube = platformCapabilities(PlatformProviderId::YouTube);
+    QVERIFY(youtube.supportsOAuth);
+    QVERIFY(youtube.supportsAutomaticIngestion);
+    QVERIFY(youtube.supportsTitle);
+    QVERIFY(youtube.supportsDescription);
+    QVERIFY(youtube.supportsThumbnail);
+    QVERIFY(youtube.supportsPrivacy);
+    QVERIFY(youtube.supportsScheduling);
+    QVERIFY(youtube.supportsLatency);
+    QVERIFY(youtube.supportsDvr);
+    QVERIFY(youtube.supportsMadeForKids);
+    QVERIFY(youtube.supportsAutoStartStop);
+
+    const PlatformCapabilities twitch = platformCapabilities(PlatformProviderId::Twitch);
+    QVERIFY(twitch.supportsOAuth);
+    QVERIFY(twitch.supportsAutomaticIngestion);
+    QVERIFY(twitch.supportsTitle);
+    QVERIFY(twitch.supportsCategory);
+    QVERIFY(twitch.supportsTags);
+    QVERIFY(!twitch.supportsDescription);
+    QVERIFY(!twitch.supportsPrivacy);
+    QVERIFY(!twitch.supportsThumbnail);
+
+    const PlatformCapabilities kick = platformCapabilities(PlatformProviderId::Kick);
+    QVERIFY(kick.supportsOAuth);
+    QVERIFY(kick.supportsTitle);
+    QVERIFY(kick.supportsCategory);
+    QVERIFY(!kick.supportsPrivacy);
+    QVERIFY(!kick.supportsTags);
+}
+
+void StudioProjectTests::generatesPkceAndRedactsSecrets()
+{
+    const QString verifier = QStringLiteral("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
+    QCOMPARE(OAuthPkce::challengeForVerifier(verifier),
+             QStringLiteral("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"));
+
+    OAuthRequest request;
+    request.authorizationEndpoint = QStringLiteral("https://accounts.google.com/o/oauth2/v2/auth");
+    request.clientId = QStringLiteral("client-id");
+    request.redirectUri = QStringLiteral("http://127.0.0.1:53190/callback");
+    request.scope = YouTubeProvider::oauthScopes().join(QLatin1Char(' '));
+    request.state = QStringLiteral("state-value");
+    request.codeVerifier = verifier;
+    request.codeChallenge = OAuthPkce::challengeForVerifier(verifier);
+    request.extraParameters.insert(QStringLiteral("access_type"), QStringLiteral("offline"));
+    const QUrl url = OAuthPkce::authorizationUrl(request);
+    const QUrlQuery query(url);
+    QCOMPARE(url.toString(QUrl::RemoveQuery), request.authorizationEndpoint);
+    QCOMPARE(query.queryItemValue(QStringLiteral("response_type")), QStringLiteral("code"));
+    QCOMPARE(query.queryItemValue(QStringLiteral("client_id")), QStringLiteral("client-id"));
+    QCOMPARE(query.queryItemValue(QStringLiteral("redirect_uri")), request.redirectUri);
+    QCOMPARE(query.queryItemValue(QStringLiteral("state")), QStringLiteral("state-value"));
+    QCOMPARE(query.queryItemValue(QStringLiteral("code_challenge")), request.codeChallenge);
+    QCOMPARE(query.queryItemValue(QStringLiteral("code_challenge_method")), QStringLiteral("S256"));
+    QCOMPARE(query.queryItemValue(QStringLiteral("access_type")), QStringLiteral("offline"));
+    QVERIFY(query.queryItemValue(QStringLiteral("scope")).contains(QStringLiteral("youtube.force-ssl")));
+
+    const QString redacted = OAuthPkce::redact(QStringLiteral("access=token refresh=refresh-key code=auth-code"),
+                                               {QStringLiteral("token"), QStringLiteral("refresh-key"), QStringLiteral("auth-code")});
+    QVERIFY(!redacted.contains(QStringLiteral("token")));
+    QVERIFY(!redacted.contains(QStringLiteral("refresh-key")));
+    QVERIFY(!redacted.contains(QStringLiteral("auth-code")));
+    QVERIFY(redacted.contains(QStringLiteral("<redacted>")));
+}
+
+void StudioProjectTests::storesCredentialsBehindAbstraction()
+{
+    InMemoryCredentialStore store;
+    QString error;
+    QVERIFY(store.writeSecret(QStringLiteral("youtube/channel-a/refresh"), QStringLiteral("refresh-token"), &error));
+    QCOMPARE(store.readSecret(QStringLiteral("youtube/channel-a/refresh"), &error), QStringLiteral("refresh-token"));
+    QVERIFY(store.deleteSecret(QStringLiteral("youtube/channel-a/refresh"), &error));
+    QVERIFY(store.readSecret(QStringLiteral("youtube/channel-a/refresh"), &error).isEmpty());
+}
+
+void StudioProjectTests::persistsDestinationsWithoutSecrets()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    StudioRepository repository(directory.path());
+    StudioProject project = StudioProject::createDefault();
+    project.streamSettings.serverUrl = QStringLiteral("rtmp://example/live");
+    project.streamSettings.streamKey = QStringLiteral("legacy-secret");
+
+    bool foundYouTube = false;
+    for (StreamDestination &destination : project.streamDestinations) {
+        if (destination.provider != PlatformProviderId::YouTube) continue;
+        foundYouTube = true;
+        project.activeStreamDestinationId = destination.id;
+        destination.accountName = QStringLiteral("Stax Channel");
+        destination.connected = true;
+        destination.configuration.insert(QStringLiteral("channelId"), QStringLiteral("UC123"));
+        destination.configuration.insert(QStringLiteral("accessToken"), QStringLiteral("access-secret"));
+        destination.configuration.insert(QStringLiteral("refreshToken"), QStringLiteral("refresh-secret"));
+        destination.configuration.insert(QStringLiteral("streamKey"), QStringLiteral("stream-secret"));
+        destination.metadata.title = QStringLiteral("Launch Stream");
+        destination.metadata.description = QStringLiteral("A development stream");
+        destination.metadata.tags = {QStringLiteral("stax"), QStringLiteral("studio")};
+    }
+    QVERIFY(foundYouTube);
+    QVERIFY(repository.save(project));
+
+    QFile file(repository.filePath());
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray saved = file.readAll();
+    QVERIFY(!saved.contains("legacy-secret"));
+    QVERIFY(!saved.contains("access-secret"));
+    QVERIFY(!saved.contains("refresh-secret"));
+    QVERIFY(!saved.contains("stream-secret"));
+
+    const StudioProject restored = repository.load();
+    QCOMPARE(restored.streamDestinations.size(), 4);
+    QVERIFY(!restored.activeStreamDestinationId.isEmpty());
+    bool restoredYouTube = false;
+    bool restoredCustom = false;
+    for (const StreamDestination &destination : restored.streamDestinations) {
+        if (destination.provider == PlatformProviderId::CustomRtmp) {
+            restoredCustom = true;
+            QCOMPARE(destination.configuration.value(QStringLiteral("serverUrl")).toString(), QStringLiteral("rtmp://example/live"));
+            QVERIFY(!destination.configuration.contains(QStringLiteral("streamKey")));
+        }
+        if (destination.provider != PlatformProviderId::YouTube) continue;
+        restoredYouTube = true;
+        QCOMPARE(destination.accountName, QStringLiteral("Stax Channel"));
+        QCOMPARE(destination.metadata.title, QStringLiteral("Launch Stream"));
+        QCOMPARE(destination.metadata.description, QStringLiteral("A development stream"));
+        QCOMPARE(destination.metadata.tags, QStringList({QStringLiteral("stax"), QStringLiteral("studio")}));
+        QCOMPARE(destination.configuration.value(QStringLiteral("channelId")).toString(), QStringLiteral("UC123"));
+        QVERIFY(!destination.configuration.contains(QStringLiteral("accessToken")));
+        QVERIFY(!destination.configuration.contains(QStringLiteral("refreshToken")));
+        QVERIFY(!destination.configuration.contains(QStringLiteral("streamKey")));
+    }
+    QVERIFY(restoredCustom);
+    QVERIFY(restoredYouTube);
+}
+
+void StudioProjectTests::serializesYouTubeBroadcastRequests()
+{
+    PlatformMetadata metadata;
+    metadata.title = QStringLiteral("Stax Launch");
+    metadata.description = QStringLiteral("Studio platform integration test");
+    metadata.privacy = QStringLiteral("unlisted");
+    metadata.categoryId = QStringLiteral("20");
+    metadata.latency = QStringLiteral("ultraLow");
+    metadata.madeForKids = true;
+    metadata.enableDvr = false;
+    metadata.autoStart = true;
+    metadata.autoStop = false;
+    metadata.scheduleForLater = true;
+    metadata.scheduledStartTime = QDateTime::fromString(QStringLiteral("2026-10-14T10:00:00Z"), Qt::ISODate);
+
+    const QVariantMap request = YouTubeProvider::createBroadcastRequest(metadata);
+    const QVariantMap snippet = request.value(QStringLiteral("snippet")).toMap();
+    const QVariantMap status = request.value(QStringLiteral("status")).toMap();
+    const QVariantMap content = request.value(QStringLiteral("contentDetails")).toMap();
+    QCOMPARE(snippet.value(QStringLiteral("title")).toString(), metadata.title);
+    QCOMPARE(snippet.value(QStringLiteral("description")).toString(), metadata.description);
+    QCOMPARE(snippet.value(QStringLiteral("categoryId")).toString(), metadata.categoryId);
+    QCOMPARE(snippet.value(QStringLiteral("scheduledStartTime")).toString(), QStringLiteral("2026-10-14T10:00:00.000Z"));
+    QCOMPARE(status.value(QStringLiteral("privacyStatus")).toString(), QStringLiteral("unlisted"));
+    QCOMPARE(status.value(QStringLiteral("selfDeclaredMadeForKids")).toBool(), true);
+    QCOMPARE(content.value(QStringLiteral("enableDvr")).toBool(), false);
+    QCOMPARE(content.value(QStringLiteral("enableAutoStart")).toBool(), true);
+    QCOMPARE(content.value(QStringLiteral("enableAutoStop")).toBool(), false);
+    QCOMPARE(content.value(QStringLiteral("latencyPreference")).toString(), QStringLiteral("ultraLow"));
+
+    const QVariantMap stream = YouTubeProvider::createStreamRequest(QStringLiteral("  "));
+    QCOMPARE(stream.value(QStringLiteral("snippet")).toMap().value(QStringLiteral("title")).toString(), QStringLiteral("StaxStudio Stream"));
+    QCOMPARE(stream.value(QStringLiteral("cdn")).toMap().value(QStringLiteral("ingestionType")).toString(), QStringLiteral("rtmp"));
+    const QString bind = YouTubeProvider::bindBroadcastUrl(QStringLiteral("broadcast-1"), QStringLiteral("stream-2"));
+    QVERIFY(bind.startsWith(QStringLiteral("https://www.googleapis.com/youtube/v3/liveBroadcasts/bind")));
+    QVERIFY(bind.contains(QStringLiteral("broadcast-1")));
+    QVERIFY(bind.contains(QStringLiteral("stream-2")));
+}
+
+void StudioProjectTests::serializesTwitchAndKickMetadata()
+{
+    PlatformMetadata metadata;
+    metadata.title = QStringLiteral("Ranked Night");
+    metadata.description = QStringLiteral("Unsupported for Twitch/Kick and must not leak into payloads");
+    metadata.privacy = QStringLiteral("private");
+    metadata.categoryId = QStringLiteral("509658");
+    metadata.language = QStringLiteral("en");
+    metadata.tags = {QStringLiteral("fps"), QStringLiteral("community")};
+
+    const QVariantMap twitch = TwitchProvider::updateChannelRequest(metadata);
+    QCOMPARE(twitch.value(QStringLiteral("title")).toString(), metadata.title);
+    QCOMPARE(twitch.value(QStringLiteral("game_id")).toString(), metadata.categoryId);
+    QCOMPARE(twitch.value(QStringLiteral("broadcaster_language")).toString(), QStringLiteral("en"));
+    QCOMPARE(twitch.value(QStringLiteral("tags")).toStringList(), metadata.tags);
+    QVERIFY(!twitch.contains(QStringLiteral("description")));
+    QVERIFY(!twitch.contains(QStringLiteral("privacy")));
+
+    const QVariantMap kick = KickProvider::updateLivestreamRequest(metadata);
+    QCOMPARE(kick.value(QStringLiteral("title")).toString(), metadata.title);
+    QCOMPARE(kick.value(QStringLiteral("category_id")).toString(), metadata.categoryId);
+    QCOMPARE(kick.value(QStringLiteral("language")).toString(), QStringLiteral("en"));
+    QVERIFY(!kick.contains(QStringLiteral("tags")));
+    QVERIFY(!kick.contains(QStringLiteral("privacy")));
 }
 
 void StudioProjectTests::recordsSimultaneousProgramAudio_data()

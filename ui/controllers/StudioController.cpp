@@ -118,6 +118,12 @@ QString StudioController::streamKey() const { return streamKey_; }
 int StudioController::streamVideoBitrateKbps() const { return project_.streamSettings.videoBitrateKbps; }
 int StudioController::streamAudioBitrateKbps() const { return project_.streamSettings.audioBitrateKbps; }
 int StudioController::streamFrameRate() const { return project_.streamSettings.frameRate; }
+QString StudioController::activeStreamProvider() const
+{
+    for (const StreamDestination &destination : project_.streamDestinations)
+        if (destination.id == project_.activeStreamDestinationId) return platformProviderName(destination.provider);
+    return platformProviderName(PlatformProviderId::CustomRtmp);
+}
 
 void StudioController::addScene(const QString &name)
 {
@@ -306,6 +312,42 @@ void StudioController::toggleRecording()
     }
 }
 
+QVariantList StudioController::streamingProviders() const
+{
+    QVariantList values;
+    for (const StreamDestination &destination : project_.streamDestinations) {
+        const PlatformCapabilities capabilities = platformCapabilities(destination.provider);
+        values.append(QVariantMap{{"id", destination.id},
+                                  {"provider", platformProviderName(destination.provider)},
+                                  {"label", platformProviderLabel(destination.provider)},
+                                  {"accountName", destination.accountName},
+                                  {"enabled", destination.enabled},
+                                  {"connected", destination.connected},
+                                  {"selected", destination.id == project_.activeStreamDestinationId},
+                                  {"summary", redactedDestinationSummary(destination)},
+                                  {"capabilities", capabilitiesToVariant(capabilities)}});
+    }
+    return values;
+}
+
+QVariantMap StudioController::providerCapabilities(const QString &providerName) const
+{
+    bool ok = false;
+    const PlatformProviderId provider = platformProviderFromName(providerName, &ok);
+    return capabilitiesToVariant(ok ? platformCapabilities(provider) : PlatformCapabilities{});
+}
+
+void StudioController::selectStreamDestination(const QString &destinationId)
+{
+    for (const StreamDestination &destination : project_.streamDestinations) {
+        if (destination.id != destinationId) continue;
+        project_.activeStreamDestinationId = destinationId;
+        save();
+        emit projectChanged();
+        return;
+    }
+}
+
 void StudioController::setStreamConfiguration(const QString &serverUrl, const QString &streamKey, const int videoBitrateKbps, const int audioBitrateKbps, const int frameRate)
 {
     project_.streamSettings.serverUrl = serverUrl.trimmed();
@@ -313,6 +355,12 @@ void StudioController::setStreamConfiguration(const QString &serverUrl, const QS
     project_.streamSettings.audioBitrateKbps = qBound(64, audioBitrateKbps, 512);
     project_.streamSettings.frameRate = qBound(1, frameRate, 60);
     streamKey_ = streamKey;
+    for (StreamDestination &destination : project_.streamDestinations) {
+        if (destination.provider == PlatformProviderId::CustomRtmp) {
+            destination.configuration.insert(QStringLiteral("serverUrl"), project_.streamSettings.serverUrl);
+            destination.connected = true;
+        }
+    }
     save();
     emit streamKeyChanged();
     emit projectChanged();
@@ -324,6 +372,14 @@ void StudioController::toggleStreaming()
     if (state == StreamingState::Connecting || state == StreamingState::Live || state == StreamingState::Reconnecting || state == StreamingState::Stopping) {
         streamer_.stop();
         updateProgramAudioSink();
+        return;
+    }
+    const StreamDestination *activeDestination = nullptr;
+    for (const StreamDestination &destination : project_.streamDestinations)
+        if (destination.id == project_.activeStreamDestinationId) activeDestination = &destination;
+    if (activeDestination && activeDestination->provider != PlatformProviderId::CustomRtmp) {
+        statusMessage_ = QStringLiteral("%1 account setup is prepared, but live API start is not enabled until OAuth credentials are configured. Custom RTMP remains available.").arg(platformProviderLabel(activeDestination->provider));
+        emit statusMessageChanged();
         return;
     }
     StreamSettings settings = project_.streamSettings;

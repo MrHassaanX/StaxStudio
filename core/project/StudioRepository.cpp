@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QSaveFile>
 #include <QStandardPaths>
 
@@ -29,6 +30,41 @@ Transform transformFromJson(const QJsonObject &json)
     value.flipHorizontal = json.value("flipHorizontal").toBool(false);
     value.flipVertical = json.value("flipVertical").toBool(false);
     return value;
+}
+
+QJsonObject destinationToJson(const StreamDestination &destination)
+{
+    QJsonObject configuration = QJsonObject::fromVariantMap(destination.configuration);
+    configuration.remove(QStringLiteral("streamKey"));
+    configuration.remove(QStringLiteral("accessToken"));
+    configuration.remove(QStringLiteral("refreshToken"));
+    return {{"id", destination.id},
+            {"provider", platformProviderName(destination.provider)},
+            {"displayName", destination.displayName},
+            {"accountName", destination.accountName},
+            {"enabled", destination.enabled},
+            {"connected", destination.connected},
+            {"configuration", configuration},
+            {"metadata", QJsonObject::fromVariantMap(metadataToVariant(destination.metadata))}};
+}
+
+StreamDestination destinationFromJson(const QJsonObject &json)
+{
+    bool ok = false;
+    StreamDestination destination;
+    destination.id = json.value("id").toString();
+    destination.provider = platformProviderFromName(json.value("provider").toString(), &ok);
+    if (!ok) destination.provider = PlatformProviderId::CustomRtmp;
+    destination.displayName = json.value("displayName").toString(platformProviderLabel(destination.provider));
+    destination.accountName = json.value("accountName").toString();
+    destination.enabled = json.value("enabled").toBool(true);
+    destination.connected = json.value("connected").toBool(destination.provider == PlatformProviderId::CustomRtmp);
+    destination.configuration = json.value("configuration").toObject().toVariantMap();
+    destination.configuration.remove(QStringLiteral("streamKey"));
+    destination.configuration.remove(QStringLiteral("accessToken"));
+    destination.configuration.remove(QStringLiteral("refreshToken"));
+    destination.metadata = metadataFromVariant(json.value("metadata").toObject().toVariantMap());
+    return destination;
 }
 }
 
@@ -89,6 +125,11 @@ StudioProject StudioRepository::load() const
     project.streamSettings.videoBitrateKbps = qBound(300, streaming.value("videoBitrateKbps").toInt(6000), 50000);
     project.streamSettings.audioBitrateKbps = qBound(64, streaming.value("audioBitrateKbps").toInt(160), 512);
     project.streamSettings.frameRate = qBound(1, streaming.value("frameRate").toInt(60), 60);
+    project.activeStreamDestinationId = root.value("activeStreamDestinationId").toString();
+    for (const QJsonValue &value : root.value("streamDestinations").toArray()) {
+        const QJsonObject destination = value.toObject();
+        if (!destination.value("id").toString().isEmpty()) project.streamDestinations.append(destinationFromJson(destination));
+    }
     if (project.profileId.isEmpty() || project.profileName.trimmed().isEmpty()) return StudioProject::createDefault();
     project.normalize();
     return project;
@@ -113,7 +154,10 @@ bool StudioRepository::save(const StudioProject &project, QString *errorMessage)
     for (const MixerChannel &channel : project.mixerChannels) {
         mixer.append(QJsonObject{{"id", channel.id}, {"name", channel.name}, {"volume", channel.volume}, {"muted", channel.muted}});
     }
+    QJsonArray destinations;
+    for (const StreamDestination &destination : project.streamDestinations) destinations.append(destinationToJson(destination));
     const QJsonObject root{{"schemaVersion", StudioProject::SchemaVersion}, {"profileId", project.profileId}, {"profileName", project.profileName}, {"activeSceneId", project.activeSceneId}, {"programWidth", project.programResolution.width}, {"programHeight", project.programResolution.height}, {"sources", sources}, {"scenes", scenes}, {"mixerChannels", mixer}, {"transition", QJsonObject{{"type", project.transition.type == TransitionType::Cut ? "Cut" : "Fade"}, {"durationMs", project.transition.durationMs}}},
+                           {"activeStreamDestinationId", project.activeStreamDestinationId}, {"streamDestinations", destinations},
                            {"streaming", QJsonObject{{"serverUrl", project.streamSettings.serverUrl}, {"videoBitrateKbps", project.streamSettings.videoBitrateKbps}, {"audioBitrateKbps", project.streamSettings.audioBitrateKbps}, {"frameRate", project.streamSettings.frameRate}}}};
     QSaveFile file(filePath());
     if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0 || !file.commit()) { if (errorMessage) *errorMessage = file.errorString(); return false; }

@@ -37,6 +37,7 @@ class StudioController final : public QObject
     Q_PROPERTY(int streamVideoBitrateKbps READ streamVideoBitrateKbps NOTIFY projectChanged FINAL)
     Q_PROPERTY(int streamAudioBitrateKbps READ streamAudioBitrateKbps NOTIFY projectChanged FINAL)
     Q_PROPERTY(int streamFrameRate READ streamFrameRate NOTIFY projectChanged FINAL)
+    Q_PROPERTY(QString activeStreamProvider READ activeStreamProvider NOTIFY projectChanged FINAL)
     Q_PROPERTY(DockLayout *dockLayout READ dockLayout CONSTANT FINAL)
 public:
     explicit StudioController(QObject *parent = nullptr);
@@ -63,6 +64,7 @@ public:
     int streamVideoBitrateKbps() const;
     int streamAudioBitrateKbps() const;
     int streamFrameRate() const;
+    QString activeStreamProvider() const;
     DockLayout *dockLayout() const { return dockLayout_; }
     Q_INVOKABLE QRectF previewCanvasRect(double width, double height, double inset) const;
 
@@ -98,6 +100,9 @@ public:
     Q_INVOKABLE void setProfileName(const QString &name);
     Q_INVOKABLE void showUnavailableAction(const QString &action);
     Q_INVOKABLE void toggleRecording();
+    Q_INVOKABLE QVariantList streamingProviders() const;
+    Q_INVOKABLE QVariantMap providerCapabilities(const QString &providerName) const;
+    Q_INVOKABLE void selectStreamDestination(const QString &destinationId);
     Q_INVOKABLE void setStreamConfiguration(const QString &serverUrl, const QString &streamKey, int videoBitrateKbps, int audioBitrateKbps, int frameRate);
     Q_INVOKABLE void toggleStreaming();
 
