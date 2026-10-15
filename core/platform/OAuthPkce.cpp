@@ -15,7 +15,7 @@ QString randomToken(const int byteCount)
 {
     QByteArray bytes;
     bytes.resize(qMax(16, byteCount));
-    QRandomGenerator *rng = QRandomGenerator::global();
+    QRandomGenerator *rng = QRandomGenerator::system();
     for (char &byte : bytes) byte = static_cast<char>(rng->bounded(256));
     return base64Url(bytes);
 }

@@ -55,7 +55,50 @@ private slots:
     void gpuPreviewShowsAllCorners();
     void dockMouseInteractions();
     void dxgiPointerComposition();
+    void streamPageLoadsWithoutWarnings();
 };
+
+void StudioUiTests::streamPageLoadsWithoutWarnings()
+{
+    QTest::failOnWarning(QRegularExpression(".*"));
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    AppController navigation;
+    StudioController controller(directory.path());
+    navigation.setGpuPreviewEnabled(false);
+    navigation.setActivePage(QStringLiteral("stream"));
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("appController", &navigation);
+    engine.rootContext()->setContextProperty("studioController", &controller);
+    engine.load(QUrl::fromLocalFile(QStringLiteral(STAX_SOURCE_DIR "/ui/qml/Main.qml")));
+    QCOMPARE(engine.rootObjects().size(), 1);
+    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    QVERIFY(window);
+    window->resize(1440, 900);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QString youtubeId, twitchId, kickId;
+    for (const QVariant &value : controller.streamingProviders()) {
+        const QVariantMap item = value.toMap();
+        if (item.value(QStringLiteral("provider")).toString() == QStringLiteral("youtube"))
+            youtubeId = item.value(QStringLiteral("id")).toString();
+        if (item.value(QStringLiteral("provider")).toString() == QStringLiteral("twitch"))
+            twitchId = item.value(QStringLiteral("id")).toString();
+        if (item.value(QStringLiteral("provider")).toString() == QStringLiteral("kick"))
+            kickId = item.value(QStringLiteral("id")).toString();
+    }
+    QVERIFY(!youtubeId.isEmpty());
+    controller.selectStreamDestination(youtubeId);
+    QTRY_VERIFY(visualItem(window->contentItem(), QStringLiteral("youtubeControls")));
+    QVERIFY(visualItem(window->contentItem(), QStringLiteral("youtubeControls"))->isVisible());
+    QVERIFY(!twitchId.isEmpty());
+    controller.selectStreamDestination(twitchId);
+    QTRY_VERIFY(visualItem(window->contentItem(), QStringLiteral("twitchControls")));
+    QVERIFY(visualItem(window->contentItem(), QStringLiteral("twitchControls"))->isVisible());
+    QVERIFY(!kickId.isEmpty());
+    controller.selectStreamDestination(kickId);
+    QTRY_VERIFY(visualItem(window->contentItem(), QStringLiteral("kickControls")));
+    QVERIFY(visualItem(window->contentItem(), QStringLiteral("kickControls"))->isVisible());
+}
 
 void StudioUiTests::dxgiPointerComposition()
 {

@@ -13,9 +13,9 @@ QVariantMap YouTubeProvider::createBroadcastRequest(const PlatformMetadata &meta
 {
     QVariantMap snippet{{"title", metadata.title.trimmed().isEmpty() ? QStringLiteral("StaxStudio Live") : metadata.title.trimmed()},
                         {"description", metadata.description},
-                        {"categoryId", metadata.categoryId}};
-    if (metadata.scheduleForLater && metadata.scheduledStartTime.isValid())
-        snippet.insert(QStringLiteral("scheduledStartTime"), metadata.scheduledStartTime.toUTC().toString(Qt::ISODateWithMs));
+                        {"scheduledStartTime", (metadata.scheduleForLater && metadata.scheduledStartTime.isValid()
+                                ? metadata.scheduledStartTime : QDateTime::currentDateTimeUtc().addSecs(60)).toUTC().toString(Qt::ISODateWithMs)}};
+    if (!metadata.categoryId.trimmed().isEmpty()) snippet.insert(QStringLiteral("categoryId"), metadata.categoryId.trimmed());
 
     const QVariantMap status{{"privacyStatus", metadata.privacy.isEmpty() ? QStringLiteral("private") : metadata.privacy},
                              {"selfDeclaredMadeForKids", metadata.madeForKids}};
@@ -58,8 +58,7 @@ QString YouTubeProvider::transitionBroadcastUrl(const QString &broadcastId, cons
 
 QStringList TwitchProvider::oauthScopes()
 {
-    return {QStringLiteral("user:read:email"),
-            QStringLiteral("channel:manage:broadcast"),
+    return {QStringLiteral("channel:manage:broadcast"),
             QStringLiteral("channel:read:stream_key")};
 }
 
@@ -81,9 +80,10 @@ QStringList KickProvider::oauthScopes()
 QVariantMap KickProvider::updateLivestreamRequest(const PlatformMetadata &metadata)
 {
     QVariantMap payload;
-    if (!metadata.title.trimmed().isEmpty()) payload.insert(QStringLiteral("title"), metadata.title.trimmed());
-    if (!metadata.categoryId.trimmed().isEmpty()) payload.insert(QStringLiteral("category_id"), metadata.categoryId.trimmed());
-    if (!metadata.language.trimmed().isEmpty()) payload.insert(QStringLiteral("language"), metadata.language.trimmed());
+    if (!metadata.title.trimmed().isEmpty()) payload.insert(QStringLiteral("stream_title"), metadata.title.trimmed());
+    bool categoryValid = false;
+    const qlonglong categoryId = metadata.categoryId.trimmed().toLongLong(&categoryValid);
+    if (categoryValid && categoryId > 0) payload.insert(QStringLiteral("category_id"), categoryId);
     return payload;
 }
 

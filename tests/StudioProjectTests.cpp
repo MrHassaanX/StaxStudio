@@ -4,8 +4,13 @@
 #include "core/audio/wasapi/WasapiAudioSource.h"
 #include "core/platform/CredentialStore.h"
 #include "core/platform/OAuthPkce.h"
+#include "core/platform/OAuthLoopback.h"
+#include "core/platform/PlatformHttp.h"
 #include "core/platform/PlatformProviders.h"
 #include "core/platform/PlatformTypes.h"
+#include "core/platform/YouTubeClient.h"
+#include "core/platform/TwitchClient.h"
+#include "core/platform/KickClient.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QUrlQuery>
@@ -20,6 +25,8 @@
 
 #include <QFile>
 #include <QTemporaryDir>
+#include <QTcpSocket>
+#include <QImage>
 #include <QtTest>
 #include <cmath>
 
@@ -57,6 +64,13 @@ private slots:
     void persistsDestinationsWithoutSecrets();
     void serializesYouTubeBroadcastRequests();
     void serializesTwitchAndKickMetadata();
+    void validatesOAuthLoopbackState();
+    void executesYouTubeLifecycleWithMockTransport();
+    void refreshesYouTubeTokensWithoutPersistingThemInProject();
+    void executesTwitchDeviceAndChannelLifecycle();
+    void executesKickOAuthAndChannelLifecycle();
+    void refreshesProviderTokensWithoutProjectSecrets();
+    void providerFailuresDoNotExposeResponseSecrets();
     void recordsSimultaneousProgramAudio_data();
     void recordsSimultaneousProgramAudio();
     void optionalWasapiEndpointProbe();
@@ -399,11 +413,319 @@ void StudioProjectTests::serializesTwitchAndKickMetadata()
     QVERIFY(!twitch.contains(QStringLiteral("privacy")));
 
     const QVariantMap kick = KickProvider::updateLivestreamRequest(metadata);
-    QCOMPARE(kick.value(QStringLiteral("title")).toString(), metadata.title);
-    QCOMPARE(kick.value(QStringLiteral("category_id")).toString(), metadata.categoryId);
-    QCOMPARE(kick.value(QStringLiteral("language")).toString(), QStringLiteral("en"));
+    QCOMPARE(kick.value(QStringLiteral("stream_title")).toString(), metadata.title);
+    QCOMPARE(kick.value(QStringLiteral("category_id")).toLongLong(), metadata.categoryId.toLongLong());
+    QVERIFY(!kick.contains(QStringLiteral("language")));
     QVERIFY(!kick.contains(QStringLiteral("tags")));
     QVERIFY(!kick.contains(QStringLiteral("privacy")));
+}
+
+namespace {
+class FakePlatformTransport final : public PlatformHttpTransport {
+public:
+    QVector<PlatformHttpRequest> requests;
+    QVector<PlatformHttpResult> replies;
+    void send(PlatformHttpRequest request, Callback callback) override
+    {
+        requests.append(std::move(request));
+        if (replies.isEmpty()) { callback({0, {}, QStringLiteral("Unscripted request")}); return; }
+        callback(replies.takeFirst());
+    }
+};
+}
+
+void StudioProjectTests::validatesOAuthLoopbackState()
+{
+    OAuthLoopback loopback;
+    QSignalSpy authorized(&loopback, &OAuthLoopback::authorized);
+    QSignalSpy failed(&loopback, &OAuthLoopback::failed);
+    OAuthRequest request;
+    request.authorizationEndpoint = QStringLiteral("https://accounts.google.com/o/oauth2/v2/auth");
+    request.clientId = QStringLiteral("test-client");
+    request.scope = QStringLiteral("youtube");
+    const auto sendCallback = [](const QUrl &auth, const QString &state) {
+        const QUrl redirect(QUrlQuery(auth).queryItemValue(QStringLiteral("redirect_uri")));
+        QTcpSocket socket;
+        socket.connectToHost(QStringLiteral("127.0.0.1"), redirect.port());
+        if (!socket.waitForConnected(3000)) return false;
+        socket.write("GET /oauth/callback?code=test-code&state=" + state.toUtf8()
+                     + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        return socket.waitForBytesWritten(3000);
+    };
+    const QUrl first = loopback.begin(request);
+    QVERIFY(first.isValid());
+    QVERIFY(sendCallback(first, QStringLiteral("wrong-state")));
+    QTRY_COMPARE(failed.count(), 1);
+    QCOMPARE(authorized.count(), 0);
+
+    const QUrl second = loopback.begin(request);
+    QVERIFY(second.isValid());
+    QVERIFY(sendCallback(second, QUrlQuery(second).queryItemValue(QStringLiteral("state"))));
+    QTRY_COMPARE(authorized.count(), 1);
+    QCOMPARE(authorized.at(0).at(0).toString(), QStringLiteral("test-code"));
+    QVERIFY(!authorized.at(0).at(1).toString().isEmpty());
+    QVERIFY(authorized.at(0).at(2).toString().startsWith(QStringLiteral("http://127.0.0.1:")));
+
+    const QUrl kickStyle = loopback.begin(request, nullptr, QStringLiteral("localhost"));
+    QVERIFY(kickStyle.isValid());
+    QVERIFY(QUrlQuery(kickStyle).queryItemValue(QStringLiteral("redirect_uri")).startsWith(QStringLiteral("http://localhost:")));
+    QVERIFY(sendCallback(kickStyle, QUrlQuery(kickStyle).queryItemValue(QStringLiteral("state"))));
+    QTRY_COMPARE(authorized.count(), 2);
+    QVERIFY(authorized.at(1).at(2).toString().startsWith(QStringLiteral("http://localhost:")));
+}
+
+void StudioProjectTests::executesYouTubeLifecycleWithMockTransport()
+{
+    FakePlatformTransport transport;
+    InMemoryCredentialStore credentials;
+    YouTubeClient client(&transport, &credentials, QStringLiteral("youtube/test"), QStringLiteral("test-client"));
+    transport.replies = {
+        {200, R"({"access_token":"access-secret","refresh_token":"refresh-secret","expires_in":3600})", {}},
+        {200, R"({"items":[{"id":"UC123","snippet":{"title":"Test Channel"}}]})", {}},
+        {200, R"({"id":"broadcast-1"})", {}},
+        {200, R"({"id":"stream-1","cdn":{"ingestionInfo":{"rtmpsIngestionAddress":"rtmps://ingest.test/live","streamName":"secret-key"}}})", {}},
+        {200, R"({"id":"broadcast-1"})", {}},
+        {200, R"({"items":[{"id":"broadcast-1","snippet":{"title":"Test Live"}}]})", {}},
+        {200, R"({"items":[]})", {}}
+    };
+    QString error;
+    client.exchangeCode(QStringLiteral("authorization-code"), QStringLiteral("verifier"),
+                        QStringLiteral("http://127.0.0.1:10001/oauth/callback"),
+                        [&](QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    QVERIFY(client.hasCredentials());
+    client.get(YouTubeClient::apiUrl(QStringLiteral("channels"), {{"part", QStringLiteral("snippet")}, {"mine", QStringLiteral("true")}}),
+               [&](QJsonObject json, QString value) { error = value; QCOMPARE(json.value("items").toArray().at(0).toObject().value("id").toString(), QStringLiteral("UC123")); });
+    QVERIFY(error.isEmpty());
+    PlatformMetadata metadata;
+    metadata.title = QStringLiteral("Test Live");
+    metadata.privacy = QStringLiteral("unlisted");
+    client.post(YouTubeClient::apiUrl(QStringLiteral("liveBroadcasts"), {{"part", QStringLiteral("snippet,status,contentDetails")}}),
+                QJsonObject::fromVariantMap(YouTubeProvider::createBroadcastRequest(metadata)),
+                [&](QJsonObject json, QString value) { error = value; QCOMPARE(json.value("id").toString(), QStringLiteral("broadcast-1")); });
+    QVERIFY(error.isEmpty());
+    client.post(YouTubeClient::apiUrl(QStringLiteral("liveStreams"), {{"part", QStringLiteral("snippet,cdn,status")}}),
+                QJsonObject::fromVariantMap(YouTubeProvider::createStreamRequest(QStringLiteral("Test Stream"))),
+                [&](QJsonObject json, QString value) { error = value; QCOMPARE(json.value("id").toString(), QStringLiteral("stream-1")); });
+    QVERIFY(error.isEmpty());
+    client.postEmpty(QUrl(YouTubeProvider::bindBroadcastUrl(QStringLiteral("broadcast-1"), QStringLiteral("stream-1"))),
+                     [&](QJsonObject, QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    client.get(YouTubeClient::apiUrl(QStringLiteral("liveBroadcasts"), {{"mine", QStringLiteral("true")}, {"part", QStringLiteral("snippet")}}),
+               [&](QJsonObject json, QString value) { error = value; QCOMPARE(json.value("items").toArray().size(), 1); });
+    QVERIFY(error.isEmpty());
+    QTemporaryDir thumbnailDirectory;
+    QVERIFY(thumbnailDirectory.isValid());
+    const QString imagePath = thumbnailDirectory.filePath(QStringLiteral("thumbnail.png"));
+    QImage image(16, 16, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    QVERIFY(image.save(imagePath));
+    client.uploadThumbnail(QStringLiteral("broadcast-1"), imagePath,
+                           [&](QJsonObject, QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    QCOMPARE(transport.requests.size(), 7);
+    QCOMPARE(transport.requests.at(0).url.host(), QStringLiteral("oauth2.googleapis.com"));
+    QCOMPARE(transport.requests.at(1).bearerToken, QByteArray("access-secret"));
+    QCOMPARE(transport.requests.at(4).body, QByteArray{});
+    QVERIFY(transport.requests.at(6).url.path().contains(QStringLiteral("upload/youtube/v3/thumbnails/set")));
+    QCOMPARE(transport.requests.at(6).contentType, QByteArray("image/png"));
+    QVERIFY(!transport.requests.at(2).body.contains("access-secret"));
+    const QString stored = credentials.readSecret(QStringLiteral("youtube/test"));
+    QVERIFY(stored.contains(QStringLiteral("refresh-secret")));
+    client.disconnect();
+    QVERIFY(credentials.readSecret(QStringLiteral("youtube/test")).isEmpty());
+}
+
+void StudioProjectTests::refreshesYouTubeTokensWithoutPersistingThemInProject()
+{
+    FakePlatformTransport transport;
+    InMemoryCredentialStore credentials;
+    const QJsonObject expired{{"clientId", QStringLiteral("test-client")},
+                              {"accessToken", QStringLiteral("expired-secret")},
+                              {"refreshToken", QStringLiteral("refresh-secret")}, {"expiresAtMs", 1}};
+    credentials.writeSecret(QStringLiteral("youtube/test"), QString::fromUtf8(QJsonDocument(expired).toJson()));
+    YouTubeClient client(&transport, &credentials, QStringLiteral("youtube/test"), QStringLiteral("test-client"));
+    transport.replies = {{200, R"({"access_token":"new-secret","expires_in":3600})", {}},
+                         {200, R"({"items":[]})", {}}};
+    QString error;
+    client.get(YouTubeClient::apiUrl(QStringLiteral("channels")),
+               [&](QJsonObject, QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    QCOMPARE(transport.requests.size(), 2);
+    QCOMPARE(transport.requests.at(0).url.host(), QStringLiteral("oauth2.googleapis.com"));
+    QCOMPARE(transport.requests.at(1).bearerToken, QByteArray("new-secret"));
+    QVERIFY(credentials.readSecret(QStringLiteral("youtube/test")).contains(QStringLiteral("refresh-secret")));
+}
+
+void StudioProjectTests::executesTwitchDeviceAndChannelLifecycle()
+{
+    FakePlatformTransport transport;
+    InMemoryCredentialStore credentials;
+    TwitchClient client(&transport, &credentials, QStringLiteral("twitch/test"), QStringLiteral("twitch-client"));
+    transport.replies = {
+        {200, R"({"device_code":"device-code","user_code":"ABCD","verification_uri":"https://www.twitch.tv/activate","interval":5})", {}},
+        {400, R"({"message":"authorization_pending"})", {}},
+        {200, R"({"access_token":"twitch-access","refresh_token":"twitch-refresh","expires_in":14400})", {}},
+        {200, R"({"client_id":"twitch-client","user_id":"123","login":"tester"})", {}},
+        {200, R"({"data":[{"id":"123","display_name":"Test Channel"}]})", {}},
+        {204, {}, {}},
+        {200, R"({"data":[{"stream_key":"live_secret"}]})", {}}
+    };
+    QString error;
+    client.beginDeviceAuthorization([&](QJsonObject json, QString value) {
+        error = value;
+        QCOMPARE(json.value(QStringLiteral("user_code")).toString(), QStringLiteral("ABCD"));
+    });
+    QVERIFY(error.isEmpty());
+    client.pollDeviceAuthorization(QStringLiteral("device-code"), [&](QJsonObject json, QString value) {
+        error = value;
+        QVERIFY(json.value(QStringLiteral("pending")).toBool());
+    });
+    QVERIFY(error.isEmpty());
+    client.pollDeviceAuthorization(QStringLiteral("device-code"), [&](QJsonObject json, QString value) {
+        error = value;
+        QVERIFY(json.value(QStringLiteral("connected")).toBool());
+    });
+    QVERIFY(error.isEmpty());
+    QVERIFY(client.hasCredentials());
+    client.validate([&](QJsonObject json, QString value) {
+        error = value;
+        QCOMPARE(json.value(QStringLiteral("user_id")).toString(), QStringLiteral("123"));
+    });
+    QVERIFY(error.isEmpty());
+    client.get(TwitchClient::apiUrl(QStringLiteral("users"), {{"id", QStringLiteral("123")}}),
+               [&](QJsonObject json, QString value) { error = value; QCOMPARE(json.value(QStringLiteral("data")).toArray().size(), 1); });
+    QVERIFY(error.isEmpty());
+    PlatformMetadata metadata;
+    metadata.title = QStringLiteral("Twitch Test");
+    metadata.categoryId = QStringLiteral("509658");
+    metadata.language = QStringLiteral("en");
+    metadata.tags = {QStringLiteral("Coding")};
+    client.updateChannel(QStringLiteral("123"), metadata, [&](QJsonObject, QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    client.get(TwitchClient::apiUrl(QStringLiteral("streams/key"), {{"broadcaster_id", QStringLiteral("123")}}),
+               [&](QJsonObject json, QString value) { error = value; QCOMPARE(json.value(QStringLiteral("data")).toArray().size(), 1); });
+    QVERIFY(error.isEmpty());
+    QCOMPARE(transport.requests.size(), 7);
+    QVERIFY(transport.requests.at(1).body.contains("scopes="));
+    QCOMPARE(transport.requests.at(3).authScheme, QByteArray("OAuth"));
+    QCOMPARE(transport.requests.at(5).method, QByteArray("PATCH"));
+    QCOMPARE(transport.requests.at(6).bearerToken, QByteArray("twitch-access"));
+    client.disconnect();
+    QVERIFY(credentials.readSecret(QStringLiteral("twitch/test")).isEmpty());
+}
+
+void StudioProjectTests::executesKickOAuthAndChannelLifecycle()
+{
+    FakePlatformTransport transport;
+    InMemoryCredentialStore credentials;
+    KickClient client(&transport, &credentials, QStringLiteral("kick/test"),
+                      QStringLiteral("kick-client"), QStringLiteral("user-supplied-secret"));
+    transport.replies = {
+        {200, R"({"access_token":"kick-access","refresh_token":"kick-refresh","expires_in":3600})", {}},
+        {200, R"({"data":[{"user_id":123,"name":"Test Kick"}]})", {}},
+        {200, R"({"data":[{"broadcaster_user_id":123,"slug":"test-kick"}]})", {}},
+        {204, {}, {}}
+    };
+    QString error;
+    client.exchangeCode(QStringLiteral("auth-code"), QStringLiteral("verifier"),
+                        QStringLiteral("http://localhost:49494/oauth/callback"),
+                        [&](QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    QVERIFY(client.hasCredentials());
+    client.get(KickClient::apiUrl(QStringLiteral("users")), [&](QJsonObject json, QString value) {
+        error = value;
+        QCOMPARE(json.value(QStringLiteral("data")).toArray().first().toObject().value(QStringLiteral("user_id")).toInteger(), 123);
+    });
+    QVERIFY(error.isEmpty());
+    client.get(KickClient::apiUrl(QStringLiteral("channels")), [&](QJsonObject json, QString value) {
+        error = value;
+        QCOMPARE(json.value(QStringLiteral("data")).toArray().size(), 1);
+    });
+    QVERIFY(error.isEmpty());
+    PlatformMetadata metadata;
+    metadata.title = QStringLiteral("Kick Test");
+    metadata.categoryId = QStringLiteral("123");
+    client.updateChannel(metadata, [&](QJsonObject, QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    QCOMPARE(transport.requests.size(), 4);
+    QVERIFY(transport.requests.at(0).body.contains("client_secret=user-supplied-secret"));
+    QCOMPARE(transport.requests.at(3).method, QByteArray("PATCH"));
+    QCOMPARE(QJsonDocument::fromJson(transport.requests.at(3).body).object().value(QStringLiteral("category_id")).toInteger(), 123);
+    QVERIFY(!credentials.readSecret(QStringLiteral("kick/test")).contains(QStringLiteral("user-supplied-secret")));
+    client.disconnect();
+    QVERIFY(credentials.readSecret(QStringLiteral("kick/test")).isEmpty());
+}
+
+void StudioProjectTests::refreshesProviderTokensWithoutProjectSecrets()
+{
+    const auto expiredToken = [](const QString &clientId) {
+        return QString::fromUtf8(QJsonDocument(QJsonObject{{"clientId", clientId},
+            {"accessToken", QStringLiteral("expired")}, {"refreshToken", QStringLiteral("old-refresh")},
+            {"expiresAtMs", 1}}).toJson(QJsonDocument::Compact));
+    };
+    InMemoryCredentialStore credentials;
+    credentials.writeSecret(QStringLiteral("twitch/refresh"), expiredToken(QStringLiteral("twitch-client")));
+    FakePlatformTransport twitchTransport;
+    TwitchClient twitch(&twitchTransport, &credentials, QStringLiteral("twitch/refresh"), QStringLiteral("twitch-client"));
+    twitchTransport.replies = {
+        {200, R"({"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600})", {}},
+        {200, R"({"data":[]})", {}}
+    };
+    QString error;
+    twitch.get(TwitchClient::apiUrl(QStringLiteral("streams")), [&](QJsonObject, QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    QCOMPARE(twitchTransport.requests.size(), 2);
+    QVERIFY(twitchTransport.requests.first().body.contains("refresh_token=old-refresh"));
+    QVERIFY(!twitchTransport.requests.first().body.contains("client_secret"));
+    QCOMPARE(twitchTransport.requests.last().bearerToken, QByteArray("new-access"));
+    QVERIFY(credentials.readSecret(QStringLiteral("twitch/refresh")).contains(QStringLiteral("new-refresh")));
+
+    credentials.writeSecret(QStringLiteral("kick/refresh"), expiredToken(QStringLiteral("kick-client")));
+    FakePlatformTransport kickTransport;
+    KickClient kick(&kickTransport, &credentials, QStringLiteral("kick/refresh"),
+                    QStringLiteral("kick-client"), QStringLiteral("user-secret"));
+    kickTransport.replies = {
+        {200, R"({"access_token":"new-kick-access","refresh_token":"new-kick-refresh","expires_in":3600})", {}},
+        {200, R"({"data":[]})", {}}
+    };
+    kick.get(KickClient::apiUrl(QStringLiteral("channels")), [&](QJsonObject, QString value) { error = value; });
+    QVERIFY(error.isEmpty());
+    QCOMPARE(kickTransport.requests.size(), 2);
+    QVERIFY(kickTransport.requests.first().body.contains("client_secret=user-secret"));
+    QCOMPARE(kickTransport.requests.last().bearerToken, QByteArray("new-kick-access"));
+    QVERIFY(!credentials.readSecret(QStringLiteral("kick/refresh")).contains(QStringLiteral("user-secret")));
+    QCOMPARE(KickClient::apiUrl(QStringLiteral("channels")).host(), QStringLiteral("api.kick.com"));
+}
+
+void StudioProjectTests::providerFailuresDoNotExposeResponseSecrets()
+{
+    InMemoryCredentialStore credentials;
+    FakePlatformTransport transport;
+    YouTubeClient youtube(&transport, &credentials, QStringLiteral("youtube/failure"), QStringLiteral("client"));
+    transport.replies = {{403, R"({"error":"quotaExceeded","message":"private-secret"})", {}}};
+    QString error;
+    youtube.exchangeCode(QStringLiteral("code"), QStringLiteral("verifier"),
+                         QStringLiteral("http://127.0.0.1:12345/oauth/callback"),
+                         [&](QString value) { error = value; });
+    QVERIFY(error.contains(QStringLiteral("YouTube")));
+    QVERIFY(!error.contains(QStringLiteral("private-secret")));
+
+    TwitchClient twitch(&transport, &credentials, QStringLiteral("twitch/failure"), QStringLiteral("client"));
+    transport.replies = {{403, R"({"message":"private-secret"})", {}}};
+    twitch.beginDeviceAuthorization([&](QJsonObject, QString value) { error = value; });
+    QVERIFY(error.contains(QStringLiteral("Twitch")));
+    QVERIFY(!error.contains(QStringLiteral("private-secret")));
+
+    KickClient kick(&transport, &credentials, QStringLiteral("kick/failure"),
+                    QStringLiteral("client"), QStringLiteral("user-secret"));
+    transport.replies = {{403, R"({"message":"private-secret"})", {}}};
+    kick.exchangeCode(QStringLiteral("code"), QStringLiteral("verifier"),
+                      QStringLiteral("http://localhost:49494/oauth/callback"),
+                      [&](QString value) { error = value; });
+    QVERIFY(error.contains(QStringLiteral("Kick")));
+    QVERIFY(!error.contains(QStringLiteral("private-secret")));
+    QVERIFY(!error.contains(QStringLiteral("user-secret")));
 }
 
 void StudioProjectTests::recordsSimultaneousProgramAudio_data()

@@ -8,9 +8,9 @@ modern interface that makes professional recording and streaming approachable.
 
 ## Current status
 
-StaxStudio is in its foundation phase. The repository currently contains the
-CMake, Qt 6, and QML application scaffold, plus a non-functional navigation UI.
-Capture, audio, encoding, recording, and streaming are not implemented yet.
+StaxStudio has a Qt/QML Studio workspace, Windows capture and audio inputs,
+local recording, Custom RTMP streaming, and in-development platform connections.
+The `develop` branch is active development; `main` contains validated checkpoints.
 
 ## Planned direction
 
@@ -23,8 +23,63 @@ Capture, audio, encoding, recording, and streaming are not implemented yet.
 
 ## Development
 
-The foundation requires a C++20 compiler, CMake 3.24 or later, and Qt 6.5 or
-later with Core, QML, Quick, and Quick Controls 2.
+The application requires a C++20 compiler, CMake 3.24 or later, Qt 6 with Core,
+Network, QML, Quick, and Quick Controls 2, and the FFmpeg development libraries.
+
+### YouTube connection (development)
+
+YouTube sign-in requires your own Google Cloud OAuth **Desktop app** Client ID.
+Enable the YouTube Data API v3 for that project, configure its OAuth consent
+screen, and add your account as a test user while the app is in testing mode.
+The channel must be eligible for YouTube Live. Do not put the Client ID or any
+OAuth credentials in this repository.
+
+On Windows, set the Client ID for your user account and then restart StaxStudio:
+
+```powershell
+setx STAX_GOOGLE_CLIENT_ID "YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com"
+```
+
+Open Stream Setup, select YouTube, and choose **Connect YouTube**. The system
+browser handles consent and returns to a temporary `127.0.0.1` callback.
+StaxStudio uses PKCE and stores tokens in Windows Credential Manager. Disconnect
+removes the saved credentials. A confidential client secret is not required for
+Google's Desktop app flow.
+
+### Twitch connection (development)
+
+Create a **public** Twitch developer application and provide its Client ID. The
+device-code flow uses the system browser and does not bundle or require a Twitch
+client secret. After authorizing, StaxStudio loads the channel, can update its
+title, category, language, and tags, and can obtain the stream key using the
+authorized Twitch API. It selects an ingest server from Twitch's official ingest
+list. On Windows, set the ID and restart StaxStudio:
+
+```powershell
+setx STAX_TWITCH_CLIENT_ID "YOUR_TWITCH_CLIENT_ID"
+```
+
+### Kick connection (development)
+
+Kick currently requires both a Client ID and a **client secret** for its OAuth
+token exchange, even with PKCE. Use credentials from your own Kick developer app;
+never commit them to Git or distribute them as shared desktop credentials.
+Register `http://localhost:49494/oauth/callback` as that app's exact redirect
+URI, then set these values and restart StaxStudio:
+
+```powershell
+setx STAX_KICK_CLIENT_ID "YOUR_KICK_CLIENT_ID"
+setx STAX_KICK_CLIENT_SECRET "YOUR_KICK_CLIENT_SECRET"
+setx STAX_KICK_REDIRECT_PORT "49494"
+```
+
+StaxStudio uses the system browser, a localhost callback, PKCE and state
+validation, and Windows Credential Manager for user tokens. It can load your
+Kick account and update documented channel title/category metadata. Kick's
+published channel schema currently does not define an ingest URL or stream key
+field, so the Kick page does not offer one-click Go Live. Use Custom RTMP with
+credentials obtained from your Kick dashboard until a supported API contract is
+available. Streaming to multiple destinations at once is not yet supported.
 
 ## License
 

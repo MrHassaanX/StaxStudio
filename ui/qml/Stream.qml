@@ -51,8 +51,8 @@ Item {
                 Layout.preferredWidth: 170
                 Layout.preferredHeight: 38
                 radius: 5
-                color: studioController.streamer.state === "Live" ? "#2E4D3B" : "#172328"
-                border.color: studioController.streamer.state === "Live" ? "#8AAC7D" : "#2F4148"
+                color: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live" ? "#2E4D3B" : "#172328"
+                border.color: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live" ? "#8AAC7D" : "#2F4148"
                 Row {
                     anchors.fill: parent
                     anchors.margins: 10
@@ -60,11 +60,13 @@ Item {
                     Rectangle {
                         width: 8; height: 8; radius: 4
                         anchors.verticalCenter: parent.verticalCenter
-                        color: studioController.streamer.state === "Live" ? "#B7E65C" : "#73878D"
+                        color: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live" ? "#B7E65C" : "#73878D"
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: studioController.streamer.state === "Live" ? "LIVE  " + root.formatElapsed(studioController.streamer.elapsedMs) : studioController.streamer.state
+                        text: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live"
+                              ? "LIVE  " + root.formatElapsed(studioController.streamer.elapsedMs)
+                              : (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state)
                         color: "#EAF0F1"
                         font.pixelSize: 12
                         font.weight: Font.DemiBold
@@ -144,7 +146,10 @@ Item {
                     spacing: 12
                     StudioSectionHeader {
                         title: root.selectedProvider === "custom-rtmp" ? "Custom RTMP" : (root.selectedProvider === "youtube" ? "YouTube" : (root.selectedProvider === "twitch" ? "Twitch" : "Kick"))
-                        subtitle: root.selectedProvider === "custom-rtmp" ? "Server URL is saved. Stream key stays session-only for now." : "Account OAuth, secure credential storage, and provider request models are staged for this provider."
+                        subtitle: root.selectedProvider === "custom-rtmp" ? "Server URL is saved. Stream key stays session-only for now."
+                                  : root.selectedProvider === "youtube" ? "Manage your YouTube broadcast and go live."
+                                  : root.selectedProvider === "twitch" ? "Manage your Twitch channel and go live."
+                                  : "Manage your Kick channel."
                     }
 
                     Text { visible: root.selectedProvider === "custom-rtmp"; text: "Server"; color: "#B6C6C9"; font.pixelSize: 12 }
@@ -166,17 +171,20 @@ Item {
                         echoMode: TextInput.Password
                     }
 
-                    Text {
-                        visible: root.selectedProvider !== "custom-rtmp"
+                    YouTubeControls {
+                        visible: root.selectedProvider === "youtube"
                         Layout.fillWidth: true
-                        color: "#A7B7BA"
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        text: root.selectedProvider === "youtube"
-                              ? "YouTube supports title, description, privacy, category, thumbnail, made-for-kids, DVR, latency, scheduling, auto-start, and auto-stop through the provider model."
-                              : (root.selectedProvider === "twitch"
-                                 ? "Twitch supports title, category/game, tags, language, and stream-key access through official scopes where authorized."
-                                 : "Kick supports channel identity, title, category, and channel metadata exposed by the official API.")
+                        Layout.fillHeight: true
+                    }
+                    TwitchControls {
+                        visible: root.selectedProvider === "twitch"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
+                    KickControls {
+                        visible: root.selectedProvider === "kick"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                     }
 
                     GridLayout {
@@ -212,6 +220,7 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
+                        visible: root.selectedProvider === "custom-rtmp"
                         Item { Layout.fillWidth: true }
                         StudioButton { text: "Save Settings"; onClicked: root.saveSettings() }
                         StudioButton {
@@ -231,8 +240,16 @@ Item {
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 10
-                    StudioSectionHeader { title: "Status"; subtitle: studioController.streamer.state === "Live" ? "RTMP output is live" : "RTMP output is offline" }
-                    Text { Layout.fillWidth: true; text: studioController.streamer.state; color: "#EAF0F1"; font.pixelSize: 18; font.weight: Font.DemiBold }
+                    StudioSectionHeader { title: "Status"; subtitle: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live" ? "Output is live" : "Output is offline" }
+                    Text { Layout.fillWidth: true; text: root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state; color: "#EAF0F1"; font.pixelSize: 18; font.weight: Font.DemiBold }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: root.selectedProvider !== "custom-rtmp" && studioController.statusMessage.length > 0
+                        text: studioController.statusMessage
+                        color: studioController.platformState === "Error" ? "#E7B17B" : "#9BAEB2"
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                    }
                     Text { Layout.fillWidth: true; text: studioController.streamer.state === "Live" ? root.formatElapsed(studioController.streamer.elapsedMs) : "00:00:00"; color: "#B7E65C"; font.pixelSize: 13; font.weight: Font.DemiBold }
                     Text {
                         Layout.fillWidth: true

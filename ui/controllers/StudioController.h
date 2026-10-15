@@ -8,10 +8,19 @@
 #include "core/recorder/LocalRecorder.h"
 #include "core/render/ProgramRenderEngine.h"
 #include "core/streaming/StreamingOutput.h"
+#include "core/platform/CredentialStore.h"
+#include "core/platform/OAuthLoopback.h"
+#include "core/platform/PlatformHttp.h"
+#include "core/platform/YouTubeClient.h"
+#include "core/platform/TwitchClient.h"
+#include "core/platform/KickClient.h"
 
 #include <QObject>
+#include <QJsonObject>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QTimer>
+#include <memory>
 
 class StudioController final : public QObject
 {
@@ -38,6 +47,16 @@ class StudioController final : public QObject
     Q_PROPERTY(int streamAudioBitrateKbps READ streamAudioBitrateKbps NOTIFY projectChanged FINAL)
     Q_PROPERTY(int streamFrameRate READ streamFrameRate NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString activeStreamProvider READ activeStreamProvider NOTIFY projectChanged FINAL)
+    Q_PROPERTY(QString platformState READ platformState NOTIFY platformStateChanged FINAL)
+    Q_PROPERTY(QVariantList youtubeBroadcasts READ youtubeBroadcasts NOTIFY projectChanged FINAL)
+    Q_PROPERTY(QVariantList youtubeCategories READ youtubeCategories NOTIFY projectChanged FINAL)
+    Q_PROPERTY(QVariantMap activeStreamMetadata READ activeStreamMetadata NOTIFY projectChanged FINAL)
+    Q_PROPERTY(QString selectedYouTubeBroadcastId READ selectedYouTubeBroadcastId NOTIFY projectChanged FINAL)
+    Q_PROPERTY(bool youtubeStreamActive READ youtubeStreamActive NOTIFY platformStateChanged FINAL)
+    Q_PROPERTY(QString twitchUserCode READ twitchUserCode NOTIFY platformStateChanged FINAL)
+    Q_PROPERTY(bool twitchStreamActive READ twitchStreamActive NOTIFY platformStateChanged FINAL)
+    Q_PROPERTY(QVariantList twitchCategories READ twitchCategories NOTIFY projectChanged FINAL)
+    Q_PROPERTY(QVariantList kickCategories READ kickCategories NOTIFY projectChanged FINAL)
     Q_PROPERTY(DockLayout *dockLayout READ dockLayout CONSTANT FINAL)
 public:
     explicit StudioController(QObject *parent = nullptr);
@@ -65,6 +84,16 @@ public:
     int streamAudioBitrateKbps() const;
     int streamFrameRate() const;
     QString activeStreamProvider() const;
+    QString platformState() const { return platformState_; }
+    QVariantList youtubeBroadcasts() const { return youtubeBroadcasts_; }
+    QVariantList youtubeCategories() const { return youtubeCategories_; }
+    QVariantMap activeStreamMetadata() const;
+    QString selectedYouTubeBroadcastId() const;
+    bool youtubeStreamActive() const { return !youtubeBroadcastId_.isEmpty(); }
+    QString twitchUserCode() const { return twitchUserCode_; }
+    bool twitchStreamActive() const { return twitchStreamActive_; }
+    QVariantList twitchCategories() const { return twitchCategories_; }
+    QVariantList kickCategories() const { return kickCategories_; }
     DockLayout *dockLayout() const { return dockLayout_; }
     Q_INVOKABLE QRectF previewCanvasRect(double width, double height, double inset) const;
 
@@ -105,18 +134,50 @@ public:
     Q_INVOKABLE void selectStreamDestination(const QString &destinationId);
     Q_INVOKABLE void setStreamConfiguration(const QString &serverUrl, const QString &streamKey, int videoBitrateKbps, int audioBitrateKbps, int frameRate);
     Q_INVOKABLE void toggleStreaming();
+    Q_INVOKABLE void connectYouTube();
+    Q_INVOKABLE void cancelYouTubeConnection();
+    Q_INVOKABLE void disconnectYouTube();
+    Q_INVOKABLE void refreshYouTubeOptions();
+    Q_INVOKABLE void setActiveStreamMetadata(const QVariantMap &values);
+    Q_INVOKABLE void selectYouTubeBroadcast(const QString &broadcastId);
+    Q_INVOKABLE void goLiveYouTube(bool recordWhileStreaming);
+    Q_INVOKABLE void stopYouTubeStream();
+    Q_INVOKABLE void connectTwitch();
+    Q_INVOKABLE void cancelTwitchConnection();
+    Q_INVOKABLE void disconnectTwitch();
+    Q_INVOKABLE void searchTwitchCategories(const QString &query);
+    Q_INVOKABLE void goLiveTwitch(bool recordWhileStreaming);
+    Q_INVOKABLE void stopTwitchStream();
+    Q_INVOKABLE void connectKick();
+    Q_INVOKABLE void cancelKickConnection();
+    Q_INVOKABLE void disconnectKick();
+    Q_INVOKABLE void searchKickCategories(const QString &query);
+    Q_INVOKABLE void updateKickChannel();
 
 signals:
     void projectChanged();
     void selectedItemChanged();
     void statusMessageChanged();
     void streamKeyChanged();
+    void platformStateChanged();
 
 private:
     DockLayout *dockLayout_ = nullptr;
     void refresh();
     void save();
     void updateProgramAudioSink();
+    void setPlatformState(const QString &state, const QString &message = {});
+    void loadYouTubeChannel();
+    void prepareYouTubeStream(const QString &broadcastId);
+    void startYouTubeIngest(const QString &broadcastId, const QJsonObject &stream);
+    void checkYouTubeReady();
+    StreamDestination *youtubeDestination();
+    StreamDestination *twitchDestination();
+    void loadTwitchAccount();
+    void pollTwitchConnection();
+    void checkTwitchReady();
+    StreamDestination *kickDestination();
+    void loadKickAccount();
     StudioRepository repository_;
     StudioProject project_;
     SceneListModel scenesModel_;
@@ -130,4 +191,32 @@ private:
     ProgramRenderEngine programEngine_;
     QString statusMessage_;
     QString streamKey_;
+    QtPlatformHttpTransport platformHttp_;
+    WindowsCredentialStore credentials_;
+    OAuthLoopback oauth_;
+    OAuthLoopback kickOauth_;
+    std::unique_ptr<YouTubeClient> youtube_;
+    std::unique_ptr<TwitchClient> twitch_;
+    std::unique_ptr<KickClient> kick_;
+    QTimer youtubePoll_;
+    QString platformState_ = QStringLiteral("Idle");
+    QString youtubeBroadcastId_;
+    QString youtubeStreamId_;
+    QVariantList youtubeBroadcasts_;
+    QVariantList youtubeCategories_;
+    bool youtubeChecking_ = false;
+    bool youtubeTransitionRequested_ = false;
+    bool recordWithYouTube_ = false;
+    bool recordingStartedForStream_ = false;
+    QTimer twitchAuthPoll_;
+    QTimer twitchLivePoll_;
+    QString twitchDeviceCode_;
+    QString twitchUserCode_;
+    qint64 twitchAuthorizationDeadlineMs_ = 0;
+    QVariantList twitchCategories_;
+    bool twitchStreamActive_ = false;
+    bool twitchChecking_ = false;
+    bool recordWithTwitch_ = false;
+    bool twitchRecordingStarted_ = false;
+    QVariantList kickCategories_;
 };

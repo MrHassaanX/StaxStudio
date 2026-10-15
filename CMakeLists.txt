@@ -16,7 +16,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # QQuickRhiItem exposes QRhi through QtGui's versioned private headers. Keep that dependency in ui/render.
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick QuickControls2 Multimedia ShaderTools Test)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui GuiPrivate Network Qml Quick QuickControls2 Multimedia ShaderTools Test)
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
@@ -59,6 +59,16 @@ qt_add_executable(StaxStudio
     core/platform/CredentialStore.h
     core/platform/OAuthPkce.cpp
     core/platform/OAuthPkce.h
+    core/platform/OAuthLoopback.cpp
+    core/platform/OAuthLoopback.h
+    core/platform/PlatformHttp.cpp
+    core/platform/PlatformHttp.h
+    core/platform/YouTubeClient.cpp
+    core/platform/YouTubeClient.h
+    core/platform/TwitchClient.cpp
+    core/platform/KickClient.cpp
+    core/platform/KickClient.h
+    core/platform/TwitchClient.h
     core/platform/PlatformProviders.cpp
     core/platform/PlatformProviders.h
     core/platform/PlatformTypes.cpp
@@ -123,6 +133,7 @@ qt_add_qml_module(StaxStudio
         ui/qml/components/SceneRow.qml
         ui/qml/components/SourceRow.qml
         ui/qml/components/StudioButton.qml
+        ui/qml/components/StudioCheckBox.qml
         ui/qml/components/StudioIcon.qml
         ui/qml/components/StudioPanel.qml
         ui/qml/components/StudioSectionHeader.qml
@@ -132,6 +143,9 @@ qt_add_qml_module(StaxStudio
         ui/qml/components/StudioMenuItem.qml
         ui/qml/components/StudioSlider.qml
         ui/qml/components/StudioTextField.qml
+        ui/qml/components/YouTubeControls.qml
+        ui/qml/components/TwitchControls.qml
+        ui/qml/components/KickControls.qml
         ui/qml/components/TransformDialog.qml
         ui/qml/components/DockPanel.qml
         ui/qml/components/DockWorkspace.qml
@@ -152,6 +166,7 @@ target_link_libraries(StaxStudio
         Qt6::Quick
         Qt6::QuickControls2
         Qt6::Multimedia
+        Qt6::Network
         ${STAX_FFMPEG_avcodec_LIBRARY}
         ${STAX_FFMPEG_avformat_LIBRARY}
         ${STAX_FFMPEG_avutil_LIBRARY}
@@ -226,6 +241,16 @@ qt_add_executable(StaxStudioTests
     core/platform/CredentialStore.h
     core/platform/OAuthPkce.cpp
     core/platform/OAuthPkce.h
+    core/platform/OAuthLoopback.cpp
+    core/platform/OAuthLoopback.h
+    core/platform/PlatformHttp.cpp
+    core/platform/PlatformHttp.h
+    core/platform/YouTubeClient.cpp
+    core/platform/YouTubeClient.h
+    core/platform/TwitchClient.cpp
+    core/platform/TwitchClient.h
+    core/platform/KickClient.cpp
+    core/platform/KickClient.h
     core/platform/PlatformProviders.cpp
     core/platform/PlatformProviders.h
     core/platform/PlatformTypes.cpp
@@ -244,7 +269,7 @@ qt_add_executable(StaxStudioTests
 )
 
 target_include_directories(StaxStudioTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${STAX_FFMPEG_INCLUDE_DIR})
-target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} advapi32 ole32 uuid propsys)
+target_link_libraries(StaxStudioTests PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} advapi32 ole32 uuid propsys)
 
 if(WIN32)
     add_custom_command(TARGET StaxStudioTests POST_BUILD
@@ -284,6 +309,16 @@ qt_add_executable(StaxStudioUiTests
     core/platform/CredentialStore.h
     core/platform/OAuthPkce.cpp
     core/platform/OAuthPkce.h
+    core/platform/OAuthLoopback.cpp
+    core/platform/OAuthLoopback.h
+    core/platform/PlatformHttp.cpp
+    core/platform/PlatformHttp.h
+    core/platform/YouTubeClient.cpp
+    core/platform/YouTubeClient.h
+    core/platform/TwitchClient.cpp
+    core/platform/TwitchClient.h
+    core/platform/KickClient.cpp
+    core/platform/KickClient.h
     core/platform/PlatformProviders.cpp
     core/platform/PlatformProviders.h
     core/platform/PlatformTypes.cpp
@@ -315,7 +350,7 @@ qt_add_shaders(StaxStudioUiTests "StaxUiTestCompositorShaders"
 )
 target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${STAX_FFMPEG_INCLUDE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} d3d11 dxgi dxguid advapi32 ole32 uuid propsys)
+target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Network Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} d3d11 dxgi dxguid advapi32 ole32 uuid propsys)
 add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
 target_link_libraries(StaxStudioUiTests PRIVATE d3dcompiler)
 foreach(target StaxStudio StaxStudioTests StaxStudioUiTests)

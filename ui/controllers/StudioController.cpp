@@ -2,8 +2,15 @@
 
 #include "core/render/CompositorScene.h"
 #include "core/render/ProgramFrameMath.h"
+#include "core/platform/PlatformProviders.h"
 #include <algorithm>
+#include <QDesktopServices>
+#include <QDateTime>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QLocale>
+#include <QUrlQuery>
 
 namespace {
 QVariantMap transformValues(const Transform &value)
@@ -26,6 +33,50 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
       statusMessage_(QStringLiteral("Studio setup is saved locally. Media capture is not connected yet."))
 {
     dockLayout_ = new DockLayout(storageDirectory, this);
+    if (StreamDestination *destination = youtubeDestination()) {
+        youtube_ = std::make_unique<YouTubeClient>(&platformHttp_, &credentials_,
+            QStringLiteral("youtube/") + destination->id,
+            qEnvironmentVariable("STAX_GOOGLE_CLIENT_ID").trimmed());
+        destination->connected = youtube_->hasCredentials();
+    }
+    if (StreamDestination *destination = twitchDestination()) {
+        twitch_ = std::make_unique<TwitchClient>(&platformHttp_, &credentials_,
+            QStringLiteral("twitch/") + destination->id,
+            qEnvironmentVariable("STAX_TWITCH_CLIENT_ID").trimmed());
+        destination->connected = twitch_->hasCredentials();
+    }
+    if (StreamDestination *destination = kickDestination()) {
+        kick_ = std::make_unique<KickClient>(&platformHttp_, &credentials_,
+            QStringLiteral("kick/") + destination->id,
+            qEnvironmentVariable("STAX_KICK_CLIENT_ID").trimmed(),
+            qEnvironmentVariable("STAX_KICK_CLIENT_SECRET").trimmed());
+        destination->connected = kick_->hasCredentials();
+    }
+    connect(&oauth_, &OAuthLoopback::authorized, this, [this](const QString &code, const QString &verifier, const QString &redirect) {
+        setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Connecting your YouTube account..."));
+        youtube_->exchangeCode(code, verifier, redirect, [this](const QString &error) {
+            if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+            loadYouTubeChannel();
+        });
+    });
+    connect(&oauth_, &OAuthLoopback::failed, this, [this](const QString &message) {
+        setPlatformState(QStringLiteral("Error"), message);
+    });
+    connect(&kickOauth_, &OAuthLoopback::authorized, this, [this](const QString &code, const QString &verifier, const QString &redirect) {
+        setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Connecting your Kick account..."));
+        kick_->exchangeCode(code, verifier, redirect, [this](const QString &error) {
+            if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+            loadKickAccount();
+        });
+    });
+    connect(&kickOauth_, &OAuthLoopback::failed, this, [this](const QString &message) {
+        setPlatformState(QStringLiteral("Error"), message);
+    });
+    youtubePoll_.setInterval(3000);
+    connect(&youtubePoll_, &QTimer::timeout, this, &StudioController::checkYouTubeReady);
+    connect(&twitchAuthPoll_, &QTimer::timeout, this, &StudioController::pollTwitchConnection);
+    twitchLivePoll_.setInterval(5000);
+    connect(&twitchLivePoll_, &QTimer::timeout, this, &StudioController::checkTwitchReady);
     connect(&visualSources_, &VisualSourceManager::framesChanged, this, [this] {
         for (const Source &source : project_.sources) {
             const CapturedVideoFrame frame = visualSources_.frame(source.id);
@@ -53,6 +104,30 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
     });
     connect(&streamer_, &StreamingOutput::stateChanged, this, [this] {
         const QString state = streamer_.stateName();
+        if (!youtubeBroadcastId_.isEmpty()) {
+            if (streamer_.state() == StreamingState::Live) {
+                setPlatformState(QStringLiteral("Waiting for YouTube"));
+                youtubePoll_.start();
+                checkYouTubeReady();
+            } else if (streamer_.state() == StreamingState::Reconnecting) {
+                setPlatformState(QStringLiteral("Reconnecting"));
+            } else if (streamer_.state() == StreamingState::Error) {
+                youtubePoll_.stop();
+                setPlatformState(QStringLiteral("Error"), streamer_.errorMessage());
+            }
+        }
+        if (twitchStreamActive_) {
+            if (streamer_.state() == StreamingState::Live) {
+                setPlatformState(QStringLiteral("Waiting for Twitch"), QStringLiteral("Waiting for Twitch to report the stream as live..."));
+                twitchLivePoll_.start();
+                checkTwitchReady();
+            } else if (streamer_.state() == StreamingState::Reconnecting) {
+                setPlatformState(QStringLiteral("Reconnecting"));
+            } else if (streamer_.state() == StreamingState::Error) {
+                twitchLivePoll_.stop();
+                setPlatformState(QStringLiteral("Error"), streamer_.errorMessage());
+            }
+        }
         statusMessage_ = streamer_.state() == StreamingState::Error
             ? QStringLiteral("Streaming error: %1").arg(streamer_.errorMessage())
             : state == QStringLiteral("Live") ? QStringLiteral("Streaming live")
@@ -339,11 +414,19 @@ QVariantMap StudioController::providerCapabilities(const QString &providerName) 
 
 void StudioController::selectStreamDestination(const QString &destinationId)
 {
+    if (streamer_.isAcceptingInput() || !youtubeBroadcastId_.isEmpty() || twitchStreamActive_) {
+        statusMessage_ = QStringLiteral("Stop the current stream before changing destinations.");
+        emit statusMessageChanged();
+        return;
+    }
     for (const StreamDestination &destination : project_.streamDestinations) {
         if (destination.id != destinationId) continue;
         project_.activeStreamDestinationId = destinationId;
         save();
         emit projectChanged();
+        if (destination.provider != PlatformProviderId::CustomRtmp)
+            setPlatformState(destination.connected ? QStringLiteral("Ready") : QStringLiteral("Idle"),
+                             destination.connected ? QStringLiteral("Account connected.") : QStringLiteral("Connect an account to continue."));
         return;
     }
 }
@@ -392,6 +475,796 @@ void StudioController::toggleStreaming()
     } else {
         updateProgramAudioSink();
     }
+}
+
+StreamDestination *StudioController::youtubeDestination()
+{
+    for (StreamDestination &destination : project_.streamDestinations)
+        if (destination.provider == PlatformProviderId::YouTube) return &destination;
+    return nullptr;
+}
+
+QVariantMap StudioController::activeStreamMetadata() const
+{
+    for (const StreamDestination &destination : project_.streamDestinations)
+        if (destination.id == project_.activeStreamDestinationId) return metadataToVariant(destination.metadata);
+    return {};
+}
+
+QString StudioController::selectedYouTubeBroadcastId() const
+{
+    for (const StreamDestination &destination : project_.streamDestinations)
+        if (destination.provider == PlatformProviderId::YouTube)
+            return destination.configuration.value(QStringLiteral("broadcastId")).toString();
+    return {};
+}
+
+void StudioController::setPlatformState(const QString &state, const QString &message)
+{
+    platformState_ = state;
+    if (!message.isEmpty()) {
+        statusMessage_ = message;
+        emit statusMessageChanged();
+    }
+    emit platformStateChanged();
+}
+
+void StudioController::connectYouTube()
+{
+    if (!youtube_ || youtube_->clientId().isEmpty()) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Set STAX_GOOGLE_CLIENT_ID to a Google Desktop OAuth Client ID, then restart StaxStudio."));
+        return;
+    }
+    if (youtube_->hasCredentials()) { loadYouTubeChannel(); return; }
+    OAuthRequest request;
+    request.authorizationEndpoint = QStringLiteral("https://accounts.google.com/o/oauth2/v2/auth");
+    request.clientId = youtube_->clientId();
+    request.scope = QStringLiteral("https://www.googleapis.com/auth/youtube");
+    request.extraParameters = {{QStringLiteral("access_type"), QStringLiteral("offline")},
+                               {QStringLiteral("prompt"), QStringLiteral("consent")}};
+    QString error;
+    const QUrl url = oauth_.begin(request, &error);
+    if (!url.isValid()) { setPlatformState(QStringLiteral("Error"), error); return; }
+    if (!QDesktopServices::openUrl(url)) {
+        oauth_.cancel();
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Unable to open your system browser for YouTube sign-in."));
+        return;
+    }
+    setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Complete YouTube sign-in in your browser."));
+}
+
+void StudioController::cancelYouTubeConnection()
+{
+    oauth_.cancel();
+    setPlatformState(QStringLiteral("Idle"), QStringLiteral("YouTube sign-in cancelled."));
+}
+
+void StudioController::disconnectYouTube()
+{
+    if (!youtube_) return;
+    if (!youtubeBroadcastId_.isEmpty()) stopYouTubeStream();
+    oauth_.cancel();
+    youtube_->disconnect();
+    if (StreamDestination *destination = youtubeDestination()) {
+        destination->connected = false;
+        destination->accountName.clear();
+        destination->configuration.remove(QStringLiteral("channelId"));
+    }
+    youtubeBroadcasts_.clear();
+    youtubeCategories_.clear();
+    save();
+    emit projectChanged();
+    setPlatformState(QStringLiteral("Idle"), QStringLiteral("YouTube account disconnected."));
+}
+
+void StudioController::loadYouTubeChannel()
+{
+    if (!youtube_) return;
+    setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Loading your YouTube channel..."));
+    youtube_->get(YouTubeClient::apiUrl(QStringLiteral("channels"), {{"part", QStringLiteral("snippet")}, {"mine", QStringLiteral("true")}}),
+                  [this](const QJsonObject &json, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        const QJsonArray channels = json.value(QStringLiteral("items")).toArray();
+        const QJsonObject channel = channels.isEmpty() ? QJsonObject{} : channels.at(0).toObject();
+        const QString id = channel.value(QStringLiteral("id")).toString();
+        const QString name = channel.value(QStringLiteral("snippet")).toObject().value(QStringLiteral("title")).toString();
+        if (id.isEmpty() || name.isEmpty()) {
+            setPlatformState(QStringLiteral("Error"), QStringLiteral("No YouTube channel is available for this account."));
+            return;
+        }
+        if (StreamDestination *destination = youtubeDestination()) {
+            destination->connected = true;
+            destination->accountName = name;
+            destination->configuration.insert(QStringLiteral("channelId"), id);
+        }
+        save();
+        emit projectChanged();
+        setPlatformState(QStringLiteral("Ready"), QStringLiteral("Connected to YouTube channel %1.").arg(name));
+        refreshYouTubeOptions();
+    });
+}
+
+void StudioController::setActiveStreamMetadata(const QVariantMap &values)
+{
+    for (StreamDestination &destination : project_.streamDestinations) {
+        if (destination.id != project_.activeStreamDestinationId) continue;
+        destination.metadata = metadataFromVariant(values);
+        save();
+        emit projectChanged();
+        return;
+    }
+}
+
+void StudioController::selectYouTubeBroadcast(const QString &broadcastId)
+{
+    StreamDestination *destination = youtubeDestination();
+    if (!destination) return;
+    destination->configuration.insert(QStringLiteral("broadcastId"), broadcastId);
+    if (broadcastId.isEmpty()) {
+        destination->metadata = PlatformMetadata{};
+        destination->metadata.title = QStringLiteral("StaxStudio Live");
+        save();
+        emit projectChanged();
+        return;
+    }
+    for (const QVariant &candidate : youtubeBroadcasts_) {
+        const QVariantMap item = candidate.toMap();
+        if (item.value(QStringLiteral("id")).toString() != broadcastId) continue;
+        destination->metadata.title = item.value(QStringLiteral("title")).toString();
+        destination->metadata.description = item.value(QStringLiteral("description")).toString();
+        destination->metadata.privacy = item.value(QStringLiteral("privacy")).toString();
+        destination->metadata.categoryId = item.value(QStringLiteral("categoryId")).toString();
+        destination->metadata.latency = item.value(QStringLiteral("latency")).toString();
+        destination->metadata.madeForKids = item.value(QStringLiteral("madeForKids")).toBool();
+        destination->metadata.enableDvr = item.value(QStringLiteral("enableDvr")).toBool();
+        destination->metadata.autoStart = item.value(QStringLiteral("autoStart")).toBool();
+        destination->metadata.autoStop = item.value(QStringLiteral("autoStop")).toBool();
+        destination->metadata.scheduledStartTime = QDateTime::fromString(item.value(QStringLiteral("scheduledStartTime")).toString(), Qt::ISODate);
+        destination->metadata.scheduleForLater = destination->metadata.scheduledStartTime.isValid();
+        destination->metadata.thumbnailPath.clear();
+        break;
+    }
+    save();
+    emit projectChanged();
+}
+
+void StudioController::refreshYouTubeOptions()
+{
+    if (!youtube_ || !youtube_->hasCredentials()) return;
+    QString region = QLocale::system().name().section(QLatin1Char('_'), 1, 1).toUpper();
+    if (region.size() != 2) region = QStringLiteral("US");
+    youtube_->get(YouTubeClient::apiUrl(QStringLiteral("videoCategories"),
+                      {{"part", QStringLiteral("snippet")}, {"regionCode", region}}),
+                  [this](const QJsonObject &json, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        youtubeCategories_.clear();
+        for (const QJsonValue &value : json.value(QStringLiteral("items")).toArray()) {
+            const QJsonObject item = value.toObject();
+            const QJsonObject snippet = item.value(QStringLiteral("snippet")).toObject();
+            if (!snippet.value(QStringLiteral("assignable")).toBool(true)) continue;
+            youtubeCategories_.append(QVariantMap{{"id", item.value(QStringLiteral("id")).toString()},
+                                                 {"title", snippet.value(QStringLiteral("title")).toString()}});
+        }
+        emit projectChanged();
+    });
+    youtubeBroadcasts_.clear();
+    const auto appendBroadcasts = [this](const QJsonObject &json, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        for (const QJsonValue &value : json.value(QStringLiteral("items")).toArray()) {
+            const QJsonObject item = value.toObject();
+            const QString id = item.value(QStringLiteral("id")).toString();
+            bool duplicate = false;
+            for (const QVariant &existing : youtubeBroadcasts_)
+                if (existing.toMap().value(QStringLiteral("id")).toString() == id) duplicate = true;
+            if (duplicate || id.isEmpty()) continue;
+            const QJsonObject snippet = item.value(QStringLiteral("snippet")).toObject();
+            const QJsonObject status = item.value(QStringLiteral("status")).toObject();
+            const QJsonObject content = item.value(QStringLiteral("contentDetails")).toObject();
+            youtubeBroadcasts_.append(QVariantMap{{"id", id}, {"title", snippet.value(QStringLiteral("title")).toString()},
+                {"description", snippet.value(QStringLiteral("description")).toString()},
+                {"categoryId", snippet.value(QStringLiteral("categoryId")).toString()},
+                {"scheduledStartTime", snippet.value(QStringLiteral("scheduledStartTime")).toString()},
+                {"privacy", status.value(QStringLiteral("privacyStatus")).toString()},
+                {"madeForKids", status.value(QStringLiteral("selfDeclaredMadeForKids")).toBool()},
+                {"status", status.value(QStringLiteral("lifeCycleStatus")).toString()},
+                {"boundStreamId", content.value(QStringLiteral("boundStreamId")).toString()},
+                {"enableDvr", content.value(QStringLiteral("enableDvr")).toBool()},
+                {"latency", content.value(QStringLiteral("latencyPreference")).toString()},
+                {"autoStart", content.value(QStringLiteral("enableAutoStart")).toBool()},
+                {"autoStop", content.value(QStringLiteral("enableAutoStop")).toBool()}});
+        }
+        emit projectChanged();
+    };
+    for (const QString &state : {QStringLiteral("upcoming"), QStringLiteral("active")}) {
+        youtube_->get(YouTubeClient::apiUrl(QStringLiteral("liveBroadcasts"),
+                          {{"part", QStringLiteral("snippet,status,contentDetails")},
+                           {"broadcastStatus", state}, {"mine", QStringLiteral("true")}}), appendBroadcasts);
+    }
+}
+
+void StudioController::goLiveYouTube(const bool recordWhileStreaming)
+{
+    StreamDestination *destination = youtubeDestination();
+    if (!youtube_ || !destination || !destination->connected || !youtube_->hasCredentials()) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Connect your YouTube channel before going live."));
+        return;
+    }
+    if (streamer_.isAcceptingInput() || !youtubeBroadcastId_.isEmpty() || twitchStreamActive_) return;
+    if (destination->metadata.title.trimmed().isEmpty()) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Enter a broadcast title."));
+        return;
+    }
+    const QString existingId = selectedYouTubeBroadcastId();
+    if (existingId.isEmpty() && destination->metadata.scheduleForLater
+        && (!destination->metadata.scheduledStartTime.isValid()
+            || destination->metadata.scheduledStartTime.toUTC() <= QDateTime::currentDateTimeUtc().addSecs(60))) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Enter a valid UTC start time at least one minute in the future."));
+        return;
+    }
+    recordWithYouTube_ = recordWhileStreaming;
+    youtubeTransitionRequested_ = false;
+    if (!existingId.isEmpty()) {
+        bool eligible = false;
+        for (const QVariant &value : youtubeBroadcasts_)
+            if (value.toMap().value(QStringLiteral("id")).toString() == existingId) eligible = true;
+        if (!eligible) { setPlatformState(QStringLiteral("Error"), QStringLiteral("Refresh and select an available YouTube broadcast.")); return; }
+        setPlatformState(QStringLiteral("Preparing"), QStringLiteral("Preparing the selected YouTube broadcast..."));
+        prepareYouTubeStream(existingId);
+        return;
+    }
+    setPlatformState(QStringLiteral("Creating Broadcast"), QStringLiteral("Creating a YouTube broadcast..."));
+    const QJsonObject body = QJsonObject::fromVariantMap(YouTubeProvider::createBroadcastRequest(destination->metadata));
+    youtube_->post(YouTubeClient::apiUrl(QStringLiteral("liveBroadcasts"),
+                       {{"part", QStringLiteral("snippet,status,contentDetails")}}), body,
+                   [this](const QJsonObject &json, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        const QString id = json.value(QStringLiteral("id")).toString();
+        if (id.isEmpty()) { setPlatformState(QStringLiteral("Error"), QStringLiteral("YouTube did not return a broadcast ID.")); return; }
+        const StreamDestination *destination = youtubeDestination();
+        if (destination && destination->metadata.scheduleForLater) {
+            const auto finishScheduling = [this] {
+                refreshYouTubeOptions();
+                setPlatformState(QStringLiteral("Scheduled"), QStringLiteral("YouTube broadcast scheduled. Select it later to go live."));
+            };
+            const QString thumbnail = destination->metadata.thumbnailPath;
+            if (thumbnail.isEmpty()) {
+                finishScheduling();
+            } else {
+                youtube_->uploadThumbnail(id, thumbnail, [this, finishScheduling](const QJsonObject &, const QString &uploadError) {
+                    if (!uploadError.isEmpty()) { setPlatformState(QStringLiteral("Error"), uploadError); return; }
+                    finishScheduling();
+                });
+            }
+            return;
+        }
+        prepareYouTubeStream(id);
+    });
+}
+
+void StudioController::prepareYouTubeStream(const QString &broadcastId)
+{
+    youtubeBroadcastId_ = broadcastId;
+    emit platformStateChanged();
+    QString boundStreamId;
+    for (const QVariant &value : youtubeBroadcasts_) {
+        const QVariantMap broadcast = value.toMap();
+        if (broadcast.value(QStringLiteral("id")).toString() == broadcastId)
+            boundStreamId = broadcast.value(QStringLiteral("boundStreamId")).toString();
+    }
+    if (!boundStreamId.isEmpty()) {
+        youtubeStreamId_ = boundStreamId;
+        youtube_->get(YouTubeClient::apiUrl(QStringLiteral("liveStreams"),
+                          {{"part", QStringLiteral("cdn,status")}, {"id", boundStreamId}}),
+                      [this, broadcastId](const QJsonObject &json, const QString &error) {
+            if (!error.isEmpty()) { youtubeBroadcastId_.clear(); setPlatformState(QStringLiteral("Error"), error); return; }
+            const QJsonArray items = json.value(QStringLiteral("items")).toArray();
+            if (items.isEmpty()) { youtubeBroadcastId_.clear(); setPlatformState(QStringLiteral("Error"), QStringLiteral("The selected broadcast's stream is unavailable.")); return; }
+            startYouTubeIngest(broadcastId, items.at(0).toObject());
+        });
+        return;
+    }
+    setPlatformState(QStringLiteral("Creating Stream"), QStringLiteral("Creating a YouTube ingest stream..."));
+    const QJsonObject body = QJsonObject::fromVariantMap(YouTubeProvider::createStreamRequest(QStringLiteral("StaxStudio Stream")));
+    youtube_->post(YouTubeClient::apiUrl(QStringLiteral("liveStreams"),
+                       {{"part", QStringLiteral("snippet,cdn,status")}}), body,
+                   [this, broadcastId](const QJsonObject &json, const QString &error) {
+        if (!error.isEmpty()) { youtubeBroadcastId_.clear(); setPlatformState(QStringLiteral("Error"), error); return; }
+        const QString streamId = json.value(QStringLiteral("id")).toString();
+        if (streamId.isEmpty()) { youtubeBroadcastId_.clear(); setPlatformState(QStringLiteral("Error"), QStringLiteral("YouTube did not return an ingest stream.")); return; }
+        youtubeStreamId_ = streamId;
+        youtube_->postEmpty(QUrl(YouTubeProvider::bindBroadcastUrl(broadcastId, streamId)),
+                            [this, broadcastId, json](const QJsonObject &, const QString &bindError) {
+            if (!bindError.isEmpty()) { youtubeBroadcastId_.clear(); setPlatformState(QStringLiteral("Error"), bindError); return; }
+            startYouTubeIngest(broadcastId, json);
+        });
+    });
+}
+
+void StudioController::startYouTubeIngest(const QString &broadcastId, const QJsonObject &stream)
+{
+    const QJsonObject ingest = stream.value(QStringLiteral("cdn")).toObject()
+                                     .value(QStringLiteral("ingestionInfo")).toObject();
+    QString server = ingest.value(QStringLiteral("rtmpsIngestionAddress")).toString();
+    if (server.isEmpty()) server = ingest.value(QStringLiteral("ingestionAddress")).toString();
+    const QString key = ingest.value(QStringLiteral("streamName")).toString();
+    if ((!server.startsWith(QStringLiteral("rtmp://")) && !server.startsWith(QStringLiteral("rtmps://"))) || key.isEmpty()) {
+        youtubeBroadcastId_.clear();
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("YouTube did not provide usable RTMP ingestion details."));
+        return;
+    }
+    const auto start = [this, server, key]() {
+        setPlatformState(QStringLiteral("Connecting"), QStringLiteral("Connecting to YouTube ingest..."));
+        StreamSettings settings = project_.streamSettings;
+        settings.serverUrl = server;
+        settings.streamKey = key;
+        audioSources_.discardPendingBlocks();
+        if (!streamer_.start(settings, project_.programResolution.size())) {
+            youtubeBroadcastId_.clear();
+            setPlatformState(QStringLiteral("Error"), QStringLiteral("Unable to start the YouTube RTMP output."));
+            return;
+        }
+        updateProgramAudioSink();
+        if (recordWithYouTube_ && recorder_.state() != RecordingState::Recording) {
+            RecordingSettings recording;
+            recordingStartedForStream_ = recorder_.start(recording, project_.programResolution.size());
+            updateProgramAudioSink();
+            if (!recordingStartedForStream_) {
+                statusMessage_ = QStringLiteral("YouTube ingest started, but local recording could not start.");
+                emit statusMessageChanged();
+            }
+        }
+    };
+    const StreamDestination *destination = youtubeDestination();
+    const QString thumbnail = destination ? destination->metadata.thumbnailPath : QString{};
+    if (thumbnail.isEmpty()) { start(); return; }
+    youtube_->uploadThumbnail(broadcastId, thumbnail, [this, start](const QJsonObject &, const QString &error) {
+        if (!error.isEmpty()) { youtubeBroadcastId_.clear(); setPlatformState(QStringLiteral("Error"), error); return; }
+        start();
+    });
+}
+
+void StudioController::checkYouTubeReady()
+{
+    if (youtubeChecking_ || youtubeBroadcastId_.isEmpty() || streamer_.state() != StreamingState::Live) return;
+    youtubeChecking_ = true;
+    youtube_->get(YouTubeClient::apiUrl(QStringLiteral("liveStreams"),
+                      {{"part", QStringLiteral("status")}, {"id", youtubeStreamId_}}),
+                  [this](const QJsonObject &stream, const QString &error) {
+        if (!error.isEmpty()) { youtubeChecking_ = false; youtubePoll_.stop(); setPlatformState(QStringLiteral("Error"), error); return; }
+        const QJsonArray streams = stream.value(QStringLiteral("items")).toArray();
+        const QString ingestState = streams.isEmpty() ? QString{} : streams.at(0).toObject()
+            .value(QStringLiteral("status")).toObject().value(QStringLiteral("streamStatus")).toString();
+        youtube_->get(YouTubeClient::apiUrl(QStringLiteral("liveBroadcasts"),
+                          {{"part", QStringLiteral("status,contentDetails")}, {"id", youtubeBroadcastId_}}),
+                      [this, ingestState](const QJsonObject &broadcast, const QString &broadcastError) {
+            youtubeChecking_ = false;
+            if (!broadcastError.isEmpty()) { youtubePoll_.stop(); setPlatformState(QStringLiteral("Error"), broadcastError); return; }
+            const QJsonArray broadcasts = broadcast.value(QStringLiteral("items")).toArray();
+            if (broadcasts.isEmpty()) { youtubePoll_.stop(); setPlatformState(QStringLiteral("Error"), QStringLiteral("YouTube broadcast disappeared.")); return; }
+            const QJsonObject item = broadcasts.at(0).toObject();
+            const QString lifeCycle = item.value(QStringLiteral("status")).toObject()
+                                          .value(QStringLiteral("lifeCycleStatus")).toString();
+            if (lifeCycle == QStringLiteral("live")) {
+                setPlatformState(QStringLiteral("Live"), QStringLiteral("Live on YouTube."));
+                return;
+            }
+            if (lifeCycle == QStringLiteral("complete") || lifeCycle == QStringLiteral("revoked")) {
+                youtubePoll_.stop();
+                setPlatformState(QStringLiteral("Error"), QStringLiteral("YouTube ended or revoked this broadcast."));
+                return;
+            }
+            if (ingestState != QStringLiteral("active")) {
+                setPlatformState(QStringLiteral("Waiting for YouTube"), QStringLiteral("Waiting for YouTube to receive the stream..."));
+                return;
+            }
+            const bool autoStart = item.value(QStringLiteral("contentDetails")).toObject()
+                                       .value(QStringLiteral("enableAutoStart")).toBool();
+            if (autoStart || youtubeTransitionRequested_) {
+                setPlatformState(QStringLiteral("Waiting for YouTube"), QStringLiteral("Waiting for YouTube broadcast readiness..."));
+                return;
+            }
+            youtubeTransitionRequested_ = true;
+            youtube_->postEmpty(QUrl(YouTubeProvider::transitionBroadcastUrl(youtubeBroadcastId_, QStringLiteral("live"))),
+                                [this](const QJsonObject &, const QString &transitionError) {
+                if (!transitionError.isEmpty()) { youtubePoll_.stop(); setPlatformState(QStringLiteral("Error"), transitionError); }
+            });
+        });
+    });
+}
+
+void StudioController::stopYouTubeStream()
+{
+    youtubePoll_.stop();
+    const QString broadcastId = std::exchange(youtubeBroadcastId_, {});
+    emit platformStateChanged();
+    youtubeStreamId_.clear();
+    const bool wasLive = platformState_ == QStringLiteral("Live");
+    setPlatformState(QStringLiteral("Stopping"));
+    streamer_.stop();
+    if (recordingStartedForStream_) { recorder_.stop(); recordingStartedForStream_ = false; }
+    updateProgramAudioSink();
+    if (wasLive && !broadcastId.isEmpty() && youtube_) {
+        const StreamDestination *destination = youtubeDestination();
+        if (destination && !destination->metadata.autoStop)
+            youtube_->postEmpty(QUrl(YouTubeProvider::transitionBroadcastUrl(broadcastId, QStringLiteral("complete"))),
+                                [this](const QJsonObject &, const QString &error) {
+                if (!error.isEmpty()) setPlatformState(QStringLiteral("Error"), error);
+            });
+    }
+    setPlatformState(QStringLiteral("Idle"), QStringLiteral("YouTube stream stopped."));
+}
+
+StreamDestination *StudioController::twitchDestination()
+{
+    for (StreamDestination &destination : project_.streamDestinations)
+        if (destination.provider == PlatformProviderId::Twitch) return &destination;
+    return nullptr;
+}
+
+void StudioController::connectTwitch()
+{
+    if (!twitch_ || twitch_->clientId().isEmpty()) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Set STAX_TWITCH_CLIENT_ID to your Twitch application Client ID, then restart StaxStudio."));
+        return;
+    }
+    if (twitch_->hasCredentials()) { loadTwitchAccount(); return; }
+    setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Requesting Twitch sign-in code..."));
+    twitch_->beginDeviceAuthorization([this](const QJsonObject &json, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        const QUrl verification(json.value(QStringLiteral("verification_uri")).toString());
+        const QString host = verification.host().toLower();
+        if (verification.scheme() != QStringLiteral("https") ||
+            (host != QStringLiteral("twitch.tv") && !host.endsWith(QStringLiteral(".twitch.tv")))) {
+            setPlatformState(QStringLiteral("Error"), QStringLiteral("Twitch returned an unexpected sign-in address."));
+            return;
+        }
+        twitchDeviceCode_ = json.value(QStringLiteral("device_code")).toString();
+        twitchUserCode_ = json.value(QStringLiteral("user_code")).toString();
+        twitchAuthorizationDeadlineMs_ = QDateTime::currentMSecsSinceEpoch() + qMax(60, json.value(QStringLiteral("expires_in")).toInt(600)) * 1000LL;
+        twitchAuthPoll_.setInterval(qMax(5, json.value(QStringLiteral("interval")).toInt(5)) * 1000);
+        if (!QDesktopServices::openUrl(verification)) {
+            cancelTwitchConnection();
+            setPlatformState(QStringLiteral("Error"), QStringLiteral("Unable to open Twitch sign-in in your browser."));
+            return;
+        }
+        twitchAuthPoll_.start();
+        emit platformStateChanged();
+        setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Approve Twitch access in your browser, then enter the displayed code."));
+    });
+}
+
+void StudioController::pollTwitchConnection()
+{
+    if (twitchDeviceCode_.isEmpty() || !twitch_) return;
+    if (QDateTime::currentMSecsSinceEpoch() >= twitchAuthorizationDeadlineMs_) {
+        cancelTwitchConnection();
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Twitch sign-in timed out. Try again."));
+        return;
+    }
+    twitchAuthPoll_.stop();
+    const QString code = twitchDeviceCode_;
+    twitch_->pollDeviceAuthorization(code, [this, code](const QJsonObject &json, const QString &error) {
+        if (code != twitchDeviceCode_) return;
+        if (!error.isEmpty()) {
+            cancelTwitchConnection();
+            setPlatformState(QStringLiteral("Error"), error);
+            return;
+        }
+        if (json.value(QStringLiteral("pending")).toBool()) {
+            if (json.value(QStringLiteral("slowDown")).toBool()) twitchAuthPoll_.setInterval(twitchAuthPoll_.interval() + 5000);
+            twitchAuthPoll_.start();
+            return;
+        }
+        twitchDeviceCode_.clear();
+        twitchUserCode_.clear();
+        emit platformStateChanged();
+        loadTwitchAccount();
+    });
+}
+
+void StudioController::cancelTwitchConnection()
+{
+    twitchAuthPoll_.stop();
+    twitchDeviceCode_.clear();
+    twitchUserCode_.clear();
+    setPlatformState(QStringLiteral("Idle"), QStringLiteral("Twitch sign-in cancelled."));
+}
+
+void StudioController::disconnectTwitch()
+{
+    if (!twitch_) return;
+    if (twitchStreamActive_) stopTwitchStream();
+    cancelTwitchConnection();
+    twitch_->disconnect();
+    if (StreamDestination *destination = twitchDestination()) {
+        destination->connected = false;
+        destination->accountName.clear();
+        destination->configuration.remove(QStringLiteral("broadcasterId"));
+    }
+    twitchCategories_.clear();
+    save();
+    emit projectChanged();
+    setPlatformState(QStringLiteral("Idle"), QStringLiteral("Twitch account disconnected."));
+}
+
+void StudioController::loadTwitchAccount()
+{
+    if (!twitch_) return;
+    setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Loading your Twitch channel..."));
+    twitch_->validate([this](const QJsonObject &validation, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        const QString id = validation.value(QStringLiteral("user_id")).toString();
+        if (id.isEmpty() || validation.value(QStringLiteral("client_id")).toString() != twitch_->clientId()) {
+            setPlatformState(QStringLiteral("Error"), QStringLiteral("Twitch returned an invalid account identity."));
+            return;
+        }
+        twitch_->get(TwitchClient::apiUrl(QStringLiteral("users"), {{"id", id}}), [this, id](const QJsonObject &users, const QString &userError) {
+            if (!userError.isEmpty()) { setPlatformState(QStringLiteral("Error"), userError); return; }
+            const QJsonArray data = users.value(QStringLiteral("data")).toArray();
+            const QJsonObject user = data.isEmpty() ? QJsonObject{} : data.first().toObject();
+            if (user.value(QStringLiteral("id")).toString() != id) {
+                setPlatformState(QStringLiteral("Error"), QStringLiteral("Twitch channel could not be verified."));
+                return;
+            }
+            if (StreamDestination *destination = twitchDestination()) {
+                destination->connected = true;
+                destination->accountName = user.value(QStringLiteral("display_name")).toString();
+                destination->configuration.insert(QStringLiteral("broadcasterId"), id);
+            }
+            save();
+            emit projectChanged();
+            setPlatformState(QStringLiteral("Ready"), QStringLiteral("Connected to Twitch."));
+        });
+    });
+}
+
+void StudioController::searchTwitchCategories(const QString &query)
+{
+    if (!twitch_ || !twitch_->hasCredentials() || query.trimmed().isEmpty()) return;
+    twitch_->get(TwitchClient::apiUrl(QStringLiteral("search/categories"), {{"query", query.trimmed()}, {"first", QStringLiteral("20")}}),
+                 [this](const QJsonObject &json, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        twitchCategories_.clear();
+        for (const QJsonValue &item : json.value(QStringLiteral("data")).toArray()) {
+            const QJsonObject category = item.toObject();
+            twitchCategories_.append(QVariantMap{{"id", category.value(QStringLiteral("id")).toString()},
+                                                {"name", category.value(QStringLiteral("name")).toString()}});
+        }
+        emit projectChanged();
+    });
+}
+
+void StudioController::goLiveTwitch(const bool recordWhileStreaming)
+{
+    StreamDestination *destination = twitchDestination();
+    if (!destination || !destination->connected || !twitch_ || !twitch_->hasCredentials()) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Connect your Twitch channel before going live."));
+        return;
+    }
+    if (streamer_.isAcceptingInput() || !youtubeBroadcastId_.isEmpty() || twitchStreamActive_) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Stop the current stream before starting another."));
+        return;
+    }
+    const QString broadcasterId = destination->configuration.value(QStringLiteral("broadcasterId")).toString();
+    if (broadcasterId.isEmpty() || destination->metadata.title.trimmed().isEmpty()) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Twitch channel or stream title is missing."));
+        return;
+    }
+    recordWithTwitch_ = recordWhileStreaming;
+    setPlatformState(QStringLiteral("Preparing"), QStringLiteral("Updating your Twitch channel..."));
+    twitch_->updateChannel(broadcasterId, destination->metadata, [this, broadcasterId](const QJsonObject &, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        twitch_->get(TwitchClient::apiUrl(QStringLiteral("streams/key"), {{"broadcaster_id", broadcasterId}}),
+                     [this](const QJsonObject &json, const QString &keyError) {
+            if (!keyError.isEmpty()) { setPlatformState(QStringLiteral("Error"), keyError); return; }
+            const QJsonArray keys = json.value(QStringLiteral("data")).toArray();
+            const QString streamKey = keys.isEmpty() ? QString{} : keys.first().toObject().value(QStringLiteral("stream_key")).toString();
+            if (streamKey.isEmpty()) { setPlatformState(QStringLiteral("Error"), QStringLiteral("Twitch did not provide a stream key.")); return; }
+            PlatformHttpRequest request;
+            request.url = QUrl(QStringLiteral("https://ingest.twitch.tv/ingests"));
+            platformHttp_.send(std::move(request), [this, streamKey](PlatformHttpResult result) {
+                if (!result.ok()) { setPlatformState(QStringLiteral("Error"), QStringLiteral("Unable to load Twitch ingest servers.")); return; }
+                const QJsonArray ingests = QJsonDocument::fromJson(result.body).object().value(QStringLiteral("ingests")).toArray();
+                QString urlTemplate;
+                for (const QJsonValue &value : ingests) {
+                    const QJsonObject ingest = value.toObject();
+                    if (ingest.value(QStringLiteral("default")).toBool()) {
+                        urlTemplate = ingest.value(QStringLiteral("url_template")).toString();
+                        break;
+                    }
+                }
+                if (urlTemplate.isEmpty() && !ingests.isEmpty()) urlTemplate = ingests.first().toObject().value(QStringLiteral("url_template")).toString();
+                const int marker = urlTemplate.indexOf(QStringLiteral("{stream_key}"));
+                const QString server = marker > 0 ? urlTemplate.left(marker) : QString{};
+                if (!server.startsWith(QStringLiteral("rtmp://")) && !server.startsWith(QStringLiteral("rtmps://"))) {
+                    setPlatformState(QStringLiteral("Error"), QStringLiteral("Twitch returned no usable ingest server."));
+                    return;
+                }
+                StreamSettings settings = project_.streamSettings;
+                settings.serverUrl = server;
+                settings.streamKey = streamKey;
+                setPlatformState(QStringLiteral("Connecting"), QStringLiteral("Connecting to Twitch ingest..."));
+                audioSources_.discardPendingBlocks();
+                twitchStreamActive_ = true;
+                emit platformStateChanged();
+                if (!streamer_.start(settings, project_.programResolution.size())) {
+                    twitchStreamActive_ = false;
+                    setPlatformState(QStringLiteral("Error"), QStringLiteral("Unable to start Twitch RTMP output."));
+                    return;
+                }
+                updateProgramAudioSink();
+                if (recordWithTwitch_ && recorder_.state() != RecordingState::Recording) {
+                    RecordingSettings recording;
+                    twitchRecordingStarted_ = recorder_.start(recording, project_.programResolution.size());
+                    updateProgramAudioSink();
+                    if (!twitchRecordingStarted_) {
+                        statusMessage_ = QStringLiteral("Twitch ingest started, but local recording could not start.");
+                        emit statusMessageChanged();
+                    }
+                }
+            });
+        });
+    });
+}
+
+void StudioController::checkTwitchReady()
+{
+    if (!twitchStreamActive_ || twitchChecking_ || streamer_.state() != StreamingState::Live || !twitch_) return;
+    const StreamDestination *destination = twitchDestination();
+    const QString id = destination ? destination->configuration.value(QStringLiteral("broadcasterId")).toString() : QString{};
+    if (id.isEmpty()) return;
+    twitchChecking_ = true;
+    twitch_->get(TwitchClient::apiUrl(QStringLiteral("streams"), {{"user_id", id}}), [this, id](const QJsonObject &json, const QString &error) {
+        twitchChecking_ = false;
+        if (!twitchStreamActive_) return;
+        if (!error.isEmpty()) { twitchLivePoll_.stop(); setPlatformState(QStringLiteral("Error"), error); return; }
+        for (const QJsonValue &entry : json.value(QStringLiteral("data")).toArray()) {
+            if (entry.toObject().value(QStringLiteral("user_id")).toString() == id) {
+                setPlatformState(QStringLiteral("Live"), QStringLiteral("Live on Twitch."));
+                return;
+            }
+        }
+        setPlatformState(QStringLiteral("Waiting for Twitch"), QStringLiteral("Waiting for Twitch to report the stream as live..."));
+    });
+}
+
+void StudioController::stopTwitchStream()
+{
+    twitchLivePoll_.stop();
+    twitchStreamActive_ = false;
+    emit platformStateChanged();
+    setPlatformState(QStringLiteral("Stopping"));
+    streamer_.stop();
+    if (twitchRecordingStarted_) { recorder_.stop(); twitchRecordingStarted_ = false; }
+    updateProgramAudioSink();
+    setPlatformState(QStringLiteral("Idle"), QStringLiteral("Twitch stream stopped."));
+}
+
+StreamDestination *StudioController::kickDestination()
+{
+    for (StreamDestination &destination : project_.streamDestinations)
+        if (destination.provider == PlatformProviderId::Kick) return &destination;
+    return nullptr;
+}
+
+void StudioController::connectKick()
+{
+    bool validPort = false;
+    const quint16 port = qEnvironmentVariable("STAX_KICK_REDIRECT_PORT").toUShort(&validPort);
+    if (!kick_ || !kick_->configured() || !validPort || port == 0) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Configure STAX_KICK_CLIENT_ID, STAX_KICK_CLIENT_SECRET, and STAX_KICK_REDIRECT_PORT for your own Kick app. Register http://localhost:<port>/oauth/callback in Kick first, then restart StaxStudio."));
+        return;
+    }
+    if (kick_->hasCredentials()) { loadKickAccount(); return; }
+    OAuthRequest request;
+    request.authorizationEndpoint = QStringLiteral("https://id.kick.com/oauth/authorize");
+    request.clientId = kick_->clientId();
+    request.scope = KickProvider::oauthScopes().join(QLatin1Char(' '));
+    QString error;
+    const QUrl url = kickOauth_.begin(request, &error, QStringLiteral("localhost"), port);
+    if (!url.isValid()) { setPlatformState(QStringLiteral("Error"), error); return; }
+    if (!QDesktopServices::openUrl(url)) {
+        kickOauth_.cancel();
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Unable to open Kick sign-in in your browser."));
+        return;
+    }
+    setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Complete Kick sign-in in your browser."));
+}
+
+void StudioController::cancelKickConnection()
+{
+    kickOauth_.cancel();
+    setPlatformState(QStringLiteral("Idle"), QStringLiteral("Kick sign-in cancelled."));
+}
+
+void StudioController::disconnectKick()
+{
+    if (!kick_) return;
+    kickOauth_.cancel();
+    kick_->disconnect();
+    if (StreamDestination *destination = kickDestination()) {
+        destination->connected = false;
+        destination->accountName.clear();
+        destination->configuration.remove(QStringLiteral("userId"));
+        destination->configuration.remove(QStringLiteral("channelSlug"));
+    }
+    kickCategories_.clear();
+    save();
+    emit projectChanged();
+    setPlatformState(QStringLiteral("Idle"), QStringLiteral("Kick account disconnected."));
+}
+
+void StudioController::loadKickAccount()
+{
+    if (!kick_) return;
+    setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Loading your Kick channel..."));
+    kick_->get(KickClient::apiUrl(QStringLiteral("users")), [this](const QJsonObject &users, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        const QJsonArray data = users.value(QStringLiteral("data")).toArray();
+        const QJsonObject user = data.isEmpty() ? QJsonObject{} : data.first().toObject();
+        const qint64 id = user.value(QStringLiteral("user_id")).toInteger();
+        const QString name = user.value(QStringLiteral("name")).toString();
+        if (id <= 0 || name.isEmpty()) { setPlatformState(QStringLiteral("Error"), QStringLiteral("Kick account identity is unavailable.")); return; }
+        kick_->get(KickClient::apiUrl(QStringLiteral("channels")), [this, id, name](const QJsonObject &channels, const QString &channelError) {
+            if (!channelError.isEmpty()) { setPlatformState(QStringLiteral("Error"), channelError); return; }
+            const QJsonArray data = channels.value(QStringLiteral("data")).toArray();
+            QJsonObject channel;
+            for (const QJsonValue &entry : data) {
+                if (entry.toObject().value(QStringLiteral("broadcaster_user_id")).toInteger() == id) {
+                    channel = entry.toObject();
+                    break;
+                }
+            }
+            if (channel.isEmpty()) { setPlatformState(QStringLiteral("Error"), QStringLiteral("Kick channel could not be verified.")); return; }
+            if (StreamDestination *destination = kickDestination()) {
+                destination->connected = true;
+                destination->accountName = name;
+                destination->configuration.insert(QStringLiteral("userId"), id);
+                destination->configuration.insert(QStringLiteral("channelSlug"), channel.value(QStringLiteral("slug")).toString());
+            }
+            save();
+            emit projectChanged();
+            setPlatformState(QStringLiteral("Ready"), QStringLiteral("Connected to Kick."));
+        });
+    });
+}
+
+void StudioController::searchKickCategories(const QString &query)
+{
+    if (!kick_ || !kick_->hasCredentials() || query.trimmed().size() < 3) return;
+    QUrl url(QStringLiteral("https://api.kick.com/public/v2/categories"));
+    QUrlQuery params;
+    params.addQueryItem(QStringLiteral("name"), query.trimmed());
+    params.addQueryItem(QStringLiteral("limit"), QStringLiteral("20"));
+    url.setQuery(params);
+    kick_->get(url, [this](const QJsonObject &json, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        kickCategories_.clear();
+        for (const QJsonValue &entry : json.value(QStringLiteral("data")).toArray()) {
+            const QJsonObject category = entry.toObject();
+            kickCategories_.append(QVariantMap{{"id", QString::number(category.value(QStringLiteral("id")).toInteger())},
+                                               {"name", category.value(QStringLiteral("name")).toString()}});
+        }
+        emit projectChanged();
+    });
+}
+
+void StudioController::updateKickChannel()
+{
+    const StreamDestination *destination = kickDestination();
+    if (!destination || !destination->connected || !kick_) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Connect Kick before updating its channel."));
+        return;
+    }
+    if (destination->metadata.title.trimmed().isEmpty()) {
+        setPlatformState(QStringLiteral("Error"), QStringLiteral("Enter a Kick stream title."));
+        return;
+    }
+    setPlatformState(QStringLiteral("Preparing"), QStringLiteral("Updating Kick channel..."));
+    kick_->updateChannel(destination->metadata, [this](const QJsonObject &, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+        setPlatformState(QStringLiteral("Ready"), QStringLiteral("Kick channel metadata updated."));
+    });
 }
 
 void StudioController::refresh()
