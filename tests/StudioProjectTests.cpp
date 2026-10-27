@@ -69,6 +69,7 @@ private slots:
     void serializesTwitchAndKickMetadata();
     void validatesOAuthLoopbackState();
     void executesYouTubeLifecycleWithMockTransport();
+    void sendsGoogleDesktopTokenCredentials();
     void reportsYouTubeOAuthFailuresSafely();
     void rejectsMissingYouTubeChannel();
     void reportsYouTubeCredentialPersistenceFailure();
@@ -308,6 +309,16 @@ void StudioProjectTests::resolvesLocalGoogleDesktopClientId()
     QCOMPARE(GoogleOAuthConfiguration::resolveClientId(preferencesPath, buildId, {}), localId);
     QCOMPARE(GoogleOAuthConfiguration::resolveClientId(preferencesPath, buildId, overrideId), overrideId);
     QCOMPARE(GoogleOAuthConfiguration::resolveClientId(preferencesPath, buildId, QStringLiteral("invalid")), localId);
+
+    InMemoryCredentialStore credentials;
+    const QString storedSecret = QStringLiteral("stored-desktop-secret");
+    QVERIFY(credentials.writeSecret(GoogleOAuthConfiguration::clientSecretCredentialKey(localId), storedSecret));
+    QCOMPARE(GoogleOAuthConfiguration::resolveClientSecret(credentials, localId, {}, {}), storedSecret);
+    QCOMPARE(GoogleOAuthConfiguration::resolveClientSecret(credentials, localId,
+                                                            QStringLiteral("release-desktop-secret"),
+                                                            QStringLiteral("override-desktop-secret")),
+             QStringLiteral("override-desktop-secret"));
+    QVERIFY(GoogleOAuthConfiguration::resolveClientSecret(credentials, QStringLiteral("wrong-client"), {}, {}).isEmpty());
 
     OAuthLoopback loopback;
     OAuthRequest request;
@@ -599,6 +610,69 @@ void StudioProjectTests::executesYouTubeLifecycleWithMockTransport()
     QVERIFY(credentials.readSecret(QStringLiteral("youtube/test")).isEmpty());
 }
 
+void StudioProjectTests::sendsGoogleDesktopTokenCredentials()
+{
+    const QString clientId = QStringLiteral("123456789-desktop.apps.googleusercontent.com");
+    const QString clientSecret = QStringLiteral("test-desktop-secret");
+    const QString redirectUri = QStringLiteral("http://127.0.0.1:43127/oauth/callback");
+    const QString verifier = QStringLiteral("test-pkce-verifier");
+
+    FakePlatformTransport exchangeTransport;
+    InMemoryCredentialStore exchangeCredentials;
+    exchangeTransport.replies = {{200, R"({"access_token":"access","refresh_token":"refresh","expires_in":3600})", {}}};
+    YouTubeClient exchangeClient(&exchangeTransport, &exchangeCredentials,
+                                 QStringLiteral("youtube/exchange"), clientId, clientSecret);
+    QString error;
+    exchangeClient.exchangeCode(QStringLiteral("authorization-code"), verifier, redirectUri,
+                                [&](QString value) { error = std::move(value); });
+    QVERIFY(error.isEmpty());
+    QCOMPARE(exchangeTransport.requests.size(), 1);
+    const PlatformHttpRequest &exchange = exchangeTransport.requests.first();
+    QCOMPARE(exchange.method, QByteArray("POST"));
+    QCOMPARE(exchange.url, QUrl(QStringLiteral("https://oauth2.googleapis.com/token")));
+    QCOMPARE(exchange.contentType, QByteArray("application/x-www-form-urlencoded"));
+    const QUrlQuery exchangeForm(QString::fromUtf8(exchange.body));
+    QCOMPARE(exchangeForm.queryItemValue(QStringLiteral("client_id")), clientId);
+    QCOMPARE(exchangeForm.queryItemValue(QStringLiteral("client_secret")), clientSecret);
+    QCOMPARE(exchangeForm.queryItemValue(QStringLiteral("code")), QStringLiteral("authorization-code"));
+    QCOMPARE(exchangeForm.queryItemValue(QStringLiteral("code_verifier")), verifier);
+    QCOMPARE(exchangeForm.queryItemValue(QStringLiteral("redirect_uri")), redirectUri);
+    QCOMPARE(exchangeForm.queryItemValue(QStringLiteral("grant_type")), QStringLiteral("authorization_code"));
+    QVERIFY(!exchangeCredentials.readSecret(QStringLiteral("youtube/exchange")).contains(clientSecret));
+
+    InMemoryCredentialStore refreshCredentials;
+    const QJsonObject expired{{"clientId", clientId}, {"accessToken", QStringLiteral("expired")},
+                              {"refreshToken", QStringLiteral("refresh-token")}, {"expiresAtMs", 1}};
+    refreshCredentials.writeSecret(QStringLiteral("youtube/refresh"),
+        QString::fromUtf8(QJsonDocument(expired).toJson(QJsonDocument::Compact)));
+    FakePlatformTransport refreshTransport;
+    refreshTransport.replies = {{200, R"({"access_token":"new-access","expires_in":3600})", {}},
+                                {200, R"({"items":[]})", {}}};
+    YouTubeClient refreshClient(&refreshTransport, &refreshCredentials,
+                                QStringLiteral("youtube/refresh"), clientId, clientSecret);
+    refreshClient.get(YouTubeClient::apiUrl(QStringLiteral("channels")),
+                      [&](QJsonObject, QString value) { error = std::move(value); });
+    QVERIFY(error.isEmpty());
+    const QUrlQuery refreshForm(QString::fromUtf8(refreshTransport.requests.first().body));
+    QCOMPARE(refreshForm.queryItemValue(QStringLiteral("client_id")), clientId);
+    QCOMPARE(refreshForm.queryItemValue(QStringLiteral("client_secret")), clientSecret);
+    QCOMPARE(refreshForm.queryItemValue(QStringLiteral("refresh_token")), QStringLiteral("refresh-token"));
+    QCOMPARE(refreshForm.queryItemValue(QStringLiteral("grant_type")), QStringLiteral("refresh_token"));
+    QVERIFY(!refreshCredentials.readSecret(QStringLiteral("youtube/refresh")).contains(clientSecret));
+
+    FakePlatformTransport publicClientTransport;
+    InMemoryCredentialStore publicClientCredentials;
+    publicClientTransport.replies = {{400, R"({"error":"invalid_request","error_description":"client_secret is missing."})", {}}};
+    YouTubeClient publicClient(&publicClientTransport, &publicClientCredentials,
+                               QStringLiteral("youtube/public"), clientId);
+    publicClient.exchangeCode(QStringLiteral("private-code"), verifier, redirectUri,
+                              [&](QString value) { error = std::move(value); });
+    QVERIFY(!publicClientTransport.requests.first().body.contains("client_secret"));
+    QVERIFY(error.contains(QStringLiteral("invalid_request")));
+    QVERIFY(error.contains(QStringLiteral("missing_client_secret")));
+    QVERIFY(!error.contains(QStringLiteral("private-code")));
+}
+
 void StudioProjectTests::reportsYouTubeOAuthFailuresSafely()
 {
     InMemoryCredentialStore credentials;
@@ -616,6 +690,16 @@ void StudioProjectTests::reportsYouTubeOAuthFailuresSafely()
     QVERIFY(!error.contains(QStringLiteral("authorization-code-must-never-appear")));
     QVERIFY(!error.contains(QStringLiteral("private-code")));
     QVERIFY(!error.contains(QStringLiteral("private-verifier")));
+
+    FakePlatformTransport missingParameterTransport;
+    missingParameterTransport.replies = {{400, R"({"error":"invalid_request","error_description":"Missing required parameter: redirect_uri; private details ignored"})", {}}};
+    YouTubeClient missingParameterClient(&missingParameterTransport, &credentials,
+                                         QStringLiteral("youtube/missing-parameter"), QStringLiteral("test-client"));
+    missingParameterClient.exchangeCode(QStringLiteral("private-code"), QStringLiteral("private-verifier"), {},
+                                        [&](QString value) { error = std::move(value); });
+    QVERIFY(error.contains(QStringLiteral("invalid_request")));
+    QVERIFY(error.contains(QStringLiteral("missing_redirect_uri")));
+    QVERIFY(!error.contains(QStringLiteral("private details ignored")));
 
     const QJsonObject stored{{"clientId", QStringLiteral("test-client")}, {"accessToken", QStringLiteral("access")},
                              {"refreshToken", QStringLiteral("refresh")}, {"expiresAtMs", QDateTime::currentMSecsSinceEpoch() + 3600000}};
@@ -842,7 +926,7 @@ void StudioProjectTests::providerFailuresDoNotExposeResponseSecrets()
     youtube.exchangeCode(QStringLiteral("code"), QStringLiteral("verifier"),
                          QStringLiteral("http://127.0.0.1:12345/oauth/callback"),
                          [&](QString value) { error = value; });
-    QVERIFY(error.contains(QStringLiteral("YouTube")));
+    QVERIFY(error.contains(QStringLiteral("Google")));
     QVERIFY(!error.contains(QStringLiteral("private-secret")));
 
     TwitchClient twitch(&transport, &credentials, QStringLiteral("twitch/failure"), QStringLiteral("client"));

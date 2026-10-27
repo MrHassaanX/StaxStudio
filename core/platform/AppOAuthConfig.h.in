@@ -1,5 +1,8 @@
 #pragma once
 
-// Public application identifiers only. Never configure a client secret here.
+// Desktop OAuth credentials may be embedded in a distributed installed app;
+// they are not a substitute for PKCE and must never be logged. Local
+// development should prefer Windows Credential Manager for the secret.
 #define STAX_GOOGLE_OAUTH_CLIENT_ID "@STAX_GOOGLE_OAUTH_CLIENT_ID@"
+#define STAX_GOOGLE_OAUTH_CLIENT_SECRET "@STAX_GOOGLE_OAUTH_CLIENT_SECRET@"
 #define STAX_TWITCH_OAUTH_CLIENT_ID "@STAX_TWITCH_OAUTH_CLIENT_ID@"

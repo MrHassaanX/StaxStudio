@@ -16,7 +16,8 @@ public:
     using ChannelCallback = std::function<void(QString, QString, QString)>;
 
     YouTubeClient(PlatformHttpTransport *transport, CredentialStore *credentials,
-                  QString credentialKey, QString clientId, QObject *parent = nullptr);
+                  QString credentialKey, QString clientId, QString clientSecret = {},
+                  QObject *parent = nullptr);
     [[nodiscard]] bool hasCredentials() const;
     [[nodiscard]] QString clientId() const { return clientId_; }
     void exchangeCode(const QString &code, const QString &verifier, const QString &redirectUri, TokenCallback callback);
@@ -41,6 +42,7 @@ private:
     CredentialStore *credentials_;
     QString credentialKey_;
     QString clientId_;
+    QString clientSecret_;
     QString accessToken_;
     QString refreshToken_;
     qint64 expiresAtMs_ = 0;

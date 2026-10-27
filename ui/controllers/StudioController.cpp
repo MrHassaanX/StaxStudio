@@ -46,9 +46,12 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
         const QString clientId = GoogleOAuthConfiguration::resolveClientId(
             preferencesPath_, QString::fromUtf8(STAX_GOOGLE_OAUTH_CLIENT_ID),
             qEnvironmentVariable("STAX_GOOGLE_CLIENT_ID"));
+        const QString clientSecret = GoogleOAuthConfiguration::resolveClientSecret(
+            credentials_, clientId, QString::fromUtf8(STAX_GOOGLE_OAUTH_CLIENT_SECRET),
+            qEnvironmentVariable("STAX_GOOGLE_CLIENT_SECRET"));
         youtube_ = std::make_unique<YouTubeClient>(&platformHttp_, &credentials_,
             QStringLiteral("youtube/") + destination->id,
-            clientId);
+            clientId, clientSecret);
         destination->connected = youtube_->hasCredentials();
     }
     if (StreamDestination *destination = twitchDestination()) {

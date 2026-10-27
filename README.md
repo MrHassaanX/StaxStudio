@@ -32,33 +32,37 @@ YouTube sign-in requires a Google Cloud OAuth **Desktop app** Client ID.
 Enable the YouTube Data API v3 for that project, configure its OAuth consent
 screen, and add your account as a test user while the app is in testing mode.
 The channel must be eligible for YouTube Live. A distributor can configure the
-public application Client ID at build time. Do not put OAuth tokens or other
-private credentials in this repository.
+installed application's Client ID and matching Desktop client secret at build
+time. Google documents Desktop applications as public clients, so an embedded
+secret is not a substitute for PKCE. Do not put local credential JSON, user
+tokens, or development credentials in this repository.
 
 ```powershell
-cmake -S . -B C:\Users\omenh\StaxStudio-build2 -DSTAX_GOOGLE_OAUTH_CLIENT_ID="YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com"
+cmake -S . -B C:\Users\omenh\StaxStudio-build2 -DSTAX_GOOGLE_OAUTH_CLIENT_ID="YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com" -DSTAX_GOOGLE_OAUTH_CLIENT_SECRET="YOUR_MATCHING_DESKTOP_CLIENT_SECRET"
 ```
 
 For a local development build, StaxStudio also reads the public Client ID from
 `oauth/googleClientId` in its `preferences.ini` file beside `studio.json` in the
-application configuration directory (on Windows, normally under
-`%LOCALAPPDATA%\StaxStudio\StaxStudio`). This file is local to the machine and
-must not be committed. It contains only the Client ID; user tokens remain in
-Windows Credential Manager. The optional environment variable below takes
-precedence over the local ID; a configured build ID is used otherwise.
+application configuration directory. This file is local to the machine and
+must not be committed. It contains only the public Client ID. The matching
+development client secret and all user tokens remain in Windows Credential
+Manager. Environment overrides remain available; configured packaged-build
+credentials are used otherwise.
 
 An optional Windows developer override is shown below; restart StaxStudio
 after changing it:
 
 ```powershell
 setx STAX_GOOGLE_CLIENT_ID "YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com"
+setx STAX_GOOGLE_CLIENT_SECRET "YOUR_MATCHING_DESKTOP_CLIENT_SECRET"
 ```
 
 Open Stream Setup, select YouTube, and choose **Connect YouTube**. The system
 browser handles consent and returns to a temporary `127.0.0.1` callback.
-StaxStudio uses PKCE and stores tokens in Windows Credential Manager. Disconnect
-removes the saved credentials. A confidential client secret is not required for
-Google's Desktop app flow.
+StaxStudio uses state validation and PKCE, and stores tokens in Windows
+Credential Manager. Disconnect removes the saved user credentials. The token
+exchange sends the matching Desktop client secret when one is configured;
+Google's documentation lists that parameter as optional for Desktop apps.
 
 ### Twitch connection (development)
 

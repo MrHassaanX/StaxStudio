@@ -18,7 +18,12 @@ QByteArray formBody(const QMap<QString, QString> &values)
     return query.query(QUrl::FullyEncoded).toUtf8();
 }
 
-QString safeProviderReason(const QByteArray &body)
+struct SafeProviderFailure {
+    QString code;
+    QString category;
+};
+
+SafeProviderFailure safeProviderFailure(const QByteArray &body)
 {
     const QJsonObject root = QJsonDocument::fromJson(body).object();
     QString reason;
@@ -32,22 +37,49 @@ QString safeProviderReason(const QByteArray &body)
         if (reason.isEmpty()) reason = error.value(QStringLiteral("status")).toString();
     }
     static const QRegularExpression safePattern(QStringLiteral("^[A-Za-z][A-Za-z0-9_.-]{0,79}$"));
-    return safePattern.match(reason).hasMatch() ? reason : QString{};
+    SafeProviderFailure failure;
+    if (safePattern.match(reason).hasMatch()) failure.code = reason;
+
+    // Never surface arbitrary provider descriptions. Map only known,
+    // non-sensitive parameter diagnostics into stable local categories.
+    const QString description = root.value(QStringLiteral("error_description")).toString().toLower();
+    if (description.contains(QStringLiteral("client_secret"))
+        && (description.contains(QStringLiteral("missing"))
+            || description.contains(QStringLiteral("required")))) {
+        failure.category = QStringLiteral("missing_client_secret");
+    } else {
+        static const QStringList parameters = {
+            QStringLiteral("client_id"), QStringLiteral("code_verifier"),
+            QStringLiteral("redirect_uri"), QStringLiteral("grant_type"),
+            QStringLiteral("refresh_token"), QStringLiteral("code")
+        };
+        for (const QString &parameter : parameters) {
+            if (description.contains(parameter)
+                && (description.contains(QStringLiteral("missing"))
+                    || description.contains(QStringLiteral("required")))) {
+                failure.category = QStringLiteral("missing_") + parameter;
+                break;
+            }
+        }
+    }
+    return failure;
 }
 
 QString operationLabel(const QString &operation)
 {
-    if (operation == QStringLiteral("token_exchange")) return QStringLiteral("YouTube Google token exchange");
-    if (operation == QStringLiteral("token_refresh")) return QStringLiteral("YouTube Google token refresh");
+    if (operation == QStringLiteral("token_exchange")) return QStringLiteral("Google token exchange");
+    if (operation == QStringLiteral("token_refresh")) return QStringLiteral("Google token refresh");
     if (operation == QStringLiteral("channel_lookup")) return QStringLiteral("YouTube channel lookup");
     return QStringLiteral("YouTube API request");
 }
 }
 
 YouTubeClient::YouTubeClient(PlatformHttpTransport *transport, CredentialStore *credentials,
-                             QString credentialKey, QString clientId, QObject *parent)
+                             QString credentialKey, QString clientId, QString clientSecret,
+                             QObject *parent)
     : QObject(parent), transport_(transport), credentials_(credentials),
-      credentialKey_(std::move(credentialKey)), clientId_(std::move(clientId))
+      credentialKey_(std::move(credentialKey)), clientId_(std::move(clientId)),
+      clientSecret_(std::move(clientSecret))
 {
     const QJsonObject stored = QJsonDocument::fromJson(credentials_->readSecret(credentialKey_).toUtf8()).object();
     if (stored.value(QStringLiteral("clientId")).toString() != clientId_) return;
@@ -69,17 +101,28 @@ void YouTubeClient::disconnect()
 QString YouTubeClient::httpError(const PlatformHttpResult &result, const QString &operation)
 {
     if (!result.error.isEmpty()) return result.error;
-    const QString reason = safeProviderReason(result.body);
+    const SafeProviderFailure failure = safeProviderFailure(result.body);
+    const QString reason = failure.code;
+    const QString diagnosticReason = failure.category.isEmpty()
+        ? (reason.isEmpty() ? QStringLiteral("unavailable") : reason)
+        : (reason.isEmpty() ? failure.category : reason + QLatin1Char('/') + failure.category);
     qWarning().noquote() << QStringLiteral("YouTube operation=%1 httpStatus=%2 providerReason=%3")
-                                .arg(operation).arg(result.status).arg(reason.isEmpty() ? QStringLiteral("unavailable") : reason);
+                                .arg(operation).arg(result.status).arg(diagnosticReason);
     const QString detail = reason.isEmpty()
         ? QStringLiteral("HTTP %1").arg(result.status)
         : QStringLiteral("HTTP %1, %2").arg(result.status).arg(reason);
+    const QString categorizedDetail = failure.category.isEmpty()
+        ? detail : detail + QStringLiteral(", ") + failure.category;
+    if ((operation == QStringLiteral("token_exchange") || operation == QStringLiteral("token_refresh"))
+        && failure.category == QStringLiteral("missing_client_secret")) {
+        return QStringLiteral("%1 failed (%2). The matching Desktop OAuth client secret is missing from the request configuration.")
+            .arg(operationLabel(operation), categorizedDetail);
+    }
     if (operation == QStringLiteral("token_exchange")) {
         if (reason == QStringLiteral("invalid_grant"))
-            return QStringLiteral("YouTube Google token exchange failed (%1). Start Connect YouTube again; the authorization code expired or its redirect/PKCE values did not match.").arg(detail);
+            return QStringLiteral("Google token exchange failed (%1). Start Connect YouTube again; the authorization code expired or its redirect/PKCE values did not match.").arg(detail);
         if (reason == QStringLiteral("invalid_client"))
-            return QStringLiteral("YouTube Google token exchange failed (%1). The configured Desktop OAuth client was rejected.").arg(detail);
+            return QStringLiteral("Google token exchange failed (%1). The configured Desktop OAuth client was rejected.").arg(detail);
         if (reason == QStringLiteral("access_denied"))
             return QStringLiteral("Google denied account access (%1). If the app is in Testing, add this account as a test user.").arg(detail);
     }
@@ -89,11 +132,11 @@ QString YouTubeClient::httpError(const PlatformHttpResult &result, const QString
         if (reason == QStringLiteral("insufficientPermissions") || reason == QStringLiteral("insufficient_scope"))
             return QStringLiteral("YouTube channel lookup failed (%1). Reconnect and grant YouTube access.").arg(detail);
     }
-    if (result.status == 401) return QStringLiteral("%1 failed (%2). Reconnect your account.").arg(operationLabel(operation), detail);
-    if (result.status == 403) return QStringLiteral("%1 was denied (%2). Check API access, permissions, or quota.").arg(operationLabel(operation), detail);
-    if (result.status == 400) return QStringLiteral("%1 was rejected (%2).").arg(operationLabel(operation), detail);
-    if (result.status == 404) return QStringLiteral("%1 could not find the requested resource (%2).").arg(operationLabel(operation), detail);
-    return QStringLiteral("%1 failed (%2).").arg(operationLabel(operation), detail);
+    if (result.status == 401) return QStringLiteral("%1 failed (%2). Reconnect your account.").arg(operationLabel(operation), categorizedDetail);
+    if (result.status == 403) return QStringLiteral("%1 was denied (%2). Check API access, permissions, or quota.").arg(operationLabel(operation), categorizedDetail);
+    if (result.status == 400) return QStringLiteral("%1 was rejected (%2).").arg(operationLabel(operation), categorizedDetail);
+    if (result.status == 404) return QStringLiteral("%1 could not find the requested resource (%2).").arg(operationLabel(operation), categorizedDetail);
+    return QStringLiteral("%1 failed (%2).").arg(operationLabel(operation), categorizedDetail);
 }
 
 void YouTubeClient::saveToken(const QJsonObject &json, bool preserveRefreshToken, TokenCallback callback)
@@ -125,8 +168,10 @@ void YouTubeClient::exchangeCode(const QString &code, const QString &verifier, c
     request.method = "POST";
     request.url = QUrl(QStringLiteral("https://oauth2.googleapis.com/token"));
     request.contentType = "application/x-www-form-urlencoded";
-    request.body = formBody({{"client_id", clientId_}, {"code", code}, {"code_verifier", verifier},
-                             {"grant_type", QStringLiteral("authorization_code")}, {"redirect_uri", redirectUri}});
+    QMap<QString, QString> values{{"client_id", clientId_}, {"code", code}, {"code_verifier", verifier},
+                                  {"grant_type", QStringLiteral("authorization_code")}, {"redirect_uri", redirectUri}};
+    if (!clientSecret_.isEmpty()) values.insert(QStringLiteral("client_secret"), clientSecret_);
+    request.body = formBody(values);
     transport_->send(std::move(request), [this, callback = std::move(callback)](PlatformHttpResult result) mutable {
         if (!result.ok()) { callback(httpError(result, QStringLiteral("token_exchange"))); return; }
         saveToken(QJsonDocument::fromJson(result.body).object(), false, std::move(callback));
@@ -165,8 +210,10 @@ void YouTubeClient::refresh()
     request.method = "POST";
     request.url = QUrl(QStringLiteral("https://oauth2.googleapis.com/token"));
     request.contentType = "application/x-www-form-urlencoded";
-    request.body = formBody({{"client_id", clientId_}, {"refresh_token", refreshToken_},
-                             {"grant_type", QStringLiteral("refresh_token")}});
+    QMap<QString, QString> values{{"client_id", clientId_}, {"refresh_token", refreshToken_},
+                                  {"grant_type", QStringLiteral("refresh_token")}};
+    if (!clientSecret_.isEmpty()) values.insert(QStringLiteral("client_secret"), clientSecret_);
+    request.body = formBody(values);
     transport_->send(std::move(request), [this](PlatformHttpResult result) {
         if (!result.ok()) { finishRefresh(httpError(result, QStringLiteral("token_refresh"))); return; }
         saveToken(QJsonDocument::fromJson(result.body).object(), true,
