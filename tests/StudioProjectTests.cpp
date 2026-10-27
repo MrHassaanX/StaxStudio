@@ -5,6 +5,7 @@
 #include "core/platform/CredentialStore.h"
 #include "core/platform/OAuthPkce.h"
 #include "core/platform/OAuthLoopback.h"
+#include "core/platform/GoogleOAuthConfiguration.h"
 #include "core/platform/PlatformHttp.h"
 #include "core/platform/PlatformProviders.h"
 #include "core/platform/PlatformTypes.h"
@@ -61,6 +62,7 @@ private slots:
     void persistsStreamSettingsWithoutStreamKey();
     void providerCapabilitiesReflectOfficialDifferences();
     void generatesPkceAndRedactsSecrets();
+    void resolvesLocalGoogleDesktopClientId();
     void storesCredentialsBehindAbstraction();
     void persistsDestinationsWithoutSecrets();
     void serializesYouTubeBroadcastRequests();
@@ -284,6 +286,44 @@ void StudioProjectTests::generatesPkceAndRedactsSecrets()
     QVERIFY(!redacted.contains(QStringLiteral("refresh-key")));
     QVERIFY(!redacted.contains(QStringLiteral("auth-code")));
     QVERIFY(redacted.contains(QStringLiteral("<redacted>")));
+}
+
+void StudioProjectTests::resolvesLocalGoogleDesktopClientId()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString preferencesPath = directory.filePath(QStringLiteral("preferences.ini"));
+    const QString localId = QStringLiteral("123456789-localdesktop.apps.googleusercontent.com");
+    const QString buildId = QStringLiteral("123456789-release.apps.googleusercontent.com");
+    const QString overrideId = QStringLiteral("123456789-override.apps.googleusercontent.com");
+    QVERIFY(GoogleOAuthConfiguration::validClientId(localId));
+    QVERIFY(!GoogleOAuthConfiguration::validClientId(QStringLiteral("client-secret")));
+    QSettings preferences(preferencesPath, QSettings::IniFormat);
+    preferences.setValue(QStringLiteral("oauth/googleClientId"), localId);
+    preferences.sync();
+    QCOMPARE(preferences.status(), QSettings::NoError);
+    QCOMPARE(GoogleOAuthConfiguration::resolveClientId(preferencesPath, buildId, {}), localId);
+    QCOMPARE(GoogleOAuthConfiguration::resolveClientId(preferencesPath, buildId, overrideId), overrideId);
+    QCOMPARE(GoogleOAuthConfiguration::resolveClientId(preferencesPath, buildId, QStringLiteral("invalid")), localId);
+
+    OAuthLoopback loopback;
+    OAuthRequest request;
+    request.authorizationEndpoint = QStringLiteral("https://accounts.google.com/o/oauth2/v2/auth");
+    request.clientId = GoogleOAuthConfiguration::resolveClientId(preferencesPath, {}, {});
+    request.scope = QStringLiteral("https://www.googleapis.com/auth/youtube");
+    const QUrl url = loopback.begin(request);
+    QVERIFY(url.isValid());
+    const QUrlQuery query(url);
+    QCOMPARE(query.queryItemValue(QStringLiteral("client_id")), localId);
+    QCOMPARE(query.queryItemValue(QStringLiteral("scope")), request.scope);
+    QVERIFY(!query.queryItemValue(QStringLiteral("state")).isEmpty());
+    QVERIFY(!query.queryItemValue(QStringLiteral("code_challenge")).isEmpty());
+    QCOMPARE(query.queryItemValue(QStringLiteral("code_challenge_method")), QStringLiteral("S256"));
+    const QUrl redirect(query.queryItemValue(QStringLiteral("redirect_uri")));
+    QCOMPARE(redirect.host(), QStringLiteral("127.0.0.1"));
+    QCOMPARE(redirect.path(), QStringLiteral("/oauth/callback"));
+    QVERIFY(redirect.port() > 0);
+    loopback.cancel();
 }
 
 void StudioProjectTests::storesCredentialsBehindAbstraction()

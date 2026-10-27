@@ -3,6 +3,7 @@
 #include "core/render/CompositorScene.h"
 #include "core/render/ProgramFrameMath.h"
 #include "core/platform/PlatformProviders.h"
+#include "core/platform/GoogleOAuthConfiguration.h"
 #include "core/recorder/RecordingDiagnostics.h"
 #include "AppOAuthConfig.h"
 #include <algorithm>
@@ -42,10 +43,12 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
     detailedRecordingDiagnostics_ = QSettings(preferencesPath_, QSettings::IniFormat)
                                         .value(QStringLiteral("recording/detailedDiagnostics"), false).toBool();
     if (StreamDestination *destination = youtubeDestination()) {
-        const QString clientId = qEnvironmentVariable("STAX_GOOGLE_CLIENT_ID").trimmed();
+        const QString clientId = GoogleOAuthConfiguration::resolveClientId(
+            preferencesPath_, QString::fromUtf8(STAX_GOOGLE_OAUTH_CLIENT_ID),
+            qEnvironmentVariable("STAX_GOOGLE_CLIENT_ID"));
         youtube_ = std::make_unique<YouTubeClient>(&platformHttp_, &credentials_,
             QStringLiteral("youtube/") + destination->id,
-            clientId.isEmpty() ? QString::fromUtf8(STAX_GOOGLE_OAUTH_CLIENT_ID) : clientId);
+            clientId);
         destination->connected = youtube_->hasCredentials();
     }
     if (StreamDestination *destination = twitchDestination()) {
@@ -70,7 +73,8 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
         });
     });
     connect(&oauth_, &OAuthLoopback::failed, this, [this](const QString &message) {
-        setPlatformState(QStringLiteral("Error"), message);
+        const QString testUserHelp = QStringLiteral(" If Google shows 403 access_denied while this app is in Testing, add your Google account under Google Auth Platform → Audience → Test users.");
+        setPlatformState(QStringLiteral("Error"), message + testUserHelp);
     });
     connect(&kickOauth_, &OAuthLoopback::authorized, this, [this](const QString &code, const QString &verifier, const QString &redirect) {
         setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Connecting your Kick account..."));
@@ -467,7 +471,7 @@ QString StudioController::providerConnectionState(const QString &providerName) c
 QString StudioController::providerSetupMessage(const QString &providerName) const
 {
     if (providerName == QStringLiteral("youtube"))
-        return QStringLiteral("This build needs a public Google Desktop OAuth Client ID and YouTube Data API access. Set STAX_GOOGLE_CLIENT_ID for development or configure the application Client ID at build time.");
+        return QStringLiteral("This build needs a Google Desktop OAuth Client ID. For development, save oauth/googleClientId in the local preferences.ini file; a public release can provide it at build time.");
     if (providerName == QStringLiteral("twitch"))
         return QStringLiteral("This build needs a registered public Twitch application Client ID. Set STAX_TWITCH_CLIENT_ID for development or configure it at build time.");
     if (providerName == QStringLiteral("kick"))

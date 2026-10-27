@@ -11,6 +11,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQmlContext>
+#include <QSettings>
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -68,6 +69,11 @@ void StudioUiTests::streamPageLoadsWithoutWarnings()
     QTest::failOnWarning(QRegularExpression(".*"));
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
+    QSettings preferences(directory.filePath(QStringLiteral("preferences.ini")), QSettings::IniFormat);
+    preferences.setValue(QStringLiteral("oauth/googleClientId"),
+                         QStringLiteral("123456789-localdesktop.apps.googleusercontent.com"));
+    preferences.sync();
+    QCOMPARE(preferences.status(), QSettings::NoError);
     AppController navigation;
     StudioController controller(directory.path());
     navigation.setGpuPreviewEnabled(false);
@@ -95,10 +101,11 @@ void StudioUiTests::streamPageLoadsWithoutWarnings()
     }
     QVERIFY(!youtubeId.isEmpty());
     controller.selectStreamDestination(youtubeId);
-    if (controller.providerConnectionState(QStringLiteral("youtube")) == QStringLiteral("Not configured"))
-        QCOMPARE(controller.platformState(), QStringLiteral("Not configured"));
+    QCOMPARE(controller.providerConnectionState(QStringLiteral("youtube")), QStringLiteral("Not connected"));
     QTRY_VERIFY(visualItem(window->contentItem(), QStringLiteral("youtubeControls")));
     QVERIFY(visualItem(window->contentItem(), QStringLiteral("youtubeControls"))->isVisible());
+    auto *connectButton = visualItem(window->contentItem(), QStringLiteral("connectYouTubeButton"));
+    QVERIFY(connectButton && connectButton->isEnabled());
     QVERIFY(!twitchId.isEmpty());
     controller.selectStreamDestination(twitchId);
     if (controller.providerConnectionState(QStringLiteral("twitch")) == QStringLiteral("Not configured"))

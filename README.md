@@ -39,10 +39,16 @@ private credentials in this repository.
 cmake -S . -B C:\Users\omenh\StaxStudio-build2 -DSTAX_GOOGLE_OAUTH_CLIENT_ID="YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com"
 ```
 
-For development, the following environment variable overrides the configured
-public ID. It is not required for ordinary users of a configured build.
+For a local development build, StaxStudio also reads the public Client ID from
+`oauth/googleClientId` in its `preferences.ini` file beside `studio.json` in the
+application configuration directory (on Windows, normally under
+`%LOCALAPPDATA%\StaxStudio\StaxStudio`). This file is local to the machine and
+must not be committed. It contains only the Client ID; user tokens remain in
+Windows Credential Manager. The optional environment variable below takes
+precedence over the local ID; a configured build ID is used otherwise.
 
-On Windows, set the Client ID for your user account and then restart StaxStudio:
+An optional Windows developer override is shown below; restart StaxStudio
+after changing it:
 
 ```powershell
 setx STAX_GOOGLE_CLIENT_ID "YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com"

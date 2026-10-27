@@ -116,6 +116,7 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 StudioButton {
+                    objectName: "connectYouTubeButton"
                     text: root.connected ? "Reconnect" : "Connect YouTube"
                     enabled: !root.setupRequired
                     onClicked: studioController.connectYouTube()
@@ -141,6 +142,14 @@ Item {
                 visible: root.setupRequired
                 text: "Setup guide"
                 onClicked: studioController.openProviderSetupHelp("youtube")
+            }
+            Text {
+                visible: !root.connected && !root.setupRequired
+                Layout.fillWidth: true
+                text: "If Google shows 403 access_denied, add this account under Google Auth Platform → Audience → Test users, then try again."
+                color: "#93A8AC"
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
             }
 
             Rectangle { Layout.fillWidth: true; Layout.topMargin: 6; height: 1; color: "#34474A" }
