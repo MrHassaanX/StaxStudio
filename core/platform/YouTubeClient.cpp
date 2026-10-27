@@ -3,8 +3,11 @@
 #include <QDateTime>
 #include <QFile>
 #include <QImageReader>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QUrlQuery>
+#include <QDebug>
 #include <utility>
 
 namespace {
@@ -13,6 +16,31 @@ QByteArray formBody(const QMap<QString, QString> &values)
     QUrlQuery query;
     for (auto it = values.cbegin(); it != values.cend(); ++it) query.addQueryItem(it.key(), it.value());
     return query.query(QUrl::FullyEncoded).toUtf8();
+}
+
+QString safeProviderReason(const QByteArray &body)
+{
+    const QJsonObject root = QJsonDocument::fromJson(body).object();
+    QString reason;
+    const QJsonValue errorValue = root.value(QStringLiteral("error"));
+    if (errorValue.isString()) {
+        reason = errorValue.toString();
+    } else if (errorValue.isObject()) {
+        const QJsonObject error = errorValue.toObject();
+        const QJsonArray errors = error.value(QStringLiteral("errors")).toArray();
+        if (!errors.isEmpty()) reason = errors.first().toObject().value(QStringLiteral("reason")).toString();
+        if (reason.isEmpty()) reason = error.value(QStringLiteral("status")).toString();
+    }
+    static const QRegularExpression safePattern(QStringLiteral("^[A-Za-z][A-Za-z0-9_.-]{0,79}$"));
+    return safePattern.match(reason).hasMatch() ? reason : QString{};
+}
+
+QString operationLabel(const QString &operation)
+{
+    if (operation == QStringLiteral("token_exchange")) return QStringLiteral("YouTube Google token exchange");
+    if (operation == QStringLiteral("token_refresh")) return QStringLiteral("YouTube Google token refresh");
+    if (operation == QStringLiteral("channel_lookup")) return QStringLiteral("YouTube channel lookup");
+    return QStringLiteral("YouTube API request");
 }
 }
 
@@ -38,14 +66,34 @@ void YouTubeClient::disconnect()
     credentials_->deleteSecret(credentialKey_);
 }
 
-QString YouTubeClient::httpError(const PlatformHttpResult &result)
+QString YouTubeClient::httpError(const PlatformHttpResult &result, const QString &operation)
 {
     if (!result.error.isEmpty()) return result.error;
-    if (result.status == 401) return QStringLiteral("YouTube authorization expired. Reconnect your account.");
-    if (result.status == 403) return QStringLiteral("YouTube denied the request. Check live eligibility, permissions, or API quota.");
-    if (result.status == 400) return QStringLiteral("YouTube rejected the request. Check broadcast settings.");
-    if (result.status == 404) return QStringLiteral("YouTube broadcast or stream was not found.");
-    return QStringLiteral("YouTube request failed (HTTP %1).").arg(result.status);
+    const QString reason = safeProviderReason(result.body);
+    qWarning().noquote() << QStringLiteral("YouTube operation=%1 httpStatus=%2 providerReason=%3")
+                                .arg(operation).arg(result.status).arg(reason.isEmpty() ? QStringLiteral("unavailable") : reason);
+    const QString detail = reason.isEmpty()
+        ? QStringLiteral("HTTP %1").arg(result.status)
+        : QStringLiteral("HTTP %1, %2").arg(result.status).arg(reason);
+    if (operation == QStringLiteral("token_exchange")) {
+        if (reason == QStringLiteral("invalid_grant"))
+            return QStringLiteral("YouTube Google token exchange failed (%1). Start Connect YouTube again; the authorization code expired or its redirect/PKCE values did not match.").arg(detail);
+        if (reason == QStringLiteral("invalid_client"))
+            return QStringLiteral("YouTube Google token exchange failed (%1). The configured Desktop OAuth client was rejected.").arg(detail);
+        if (reason == QStringLiteral("access_denied"))
+            return QStringLiteral("Google denied account access (%1). If the app is in Testing, add this account as a test user.").arg(detail);
+    }
+    if (operation == QStringLiteral("channel_lookup") && result.status == 403) {
+        if (reason == QStringLiteral("accessNotConfigured") || reason == QStringLiteral("SERVICE_DISABLED"))
+            return QStringLiteral("YouTube channel lookup failed (%1). Enable YouTube Data API v3 for this Google Cloud project, then try again.").arg(detail);
+        if (reason == QStringLiteral("insufficientPermissions") || reason == QStringLiteral("insufficient_scope"))
+            return QStringLiteral("YouTube channel lookup failed (%1). Reconnect and grant YouTube access.").arg(detail);
+    }
+    if (result.status == 401) return QStringLiteral("%1 failed (%2). Reconnect your account.").arg(operationLabel(operation), detail);
+    if (result.status == 403) return QStringLiteral("%1 was denied (%2). Check API access, permissions, or quota.").arg(operationLabel(operation), detail);
+    if (result.status == 400) return QStringLiteral("%1 was rejected (%2).").arg(operationLabel(operation), detail);
+    if (result.status == 404) return QStringLiteral("%1 could not find the requested resource (%2).").arg(operationLabel(operation), detail);
+    return QStringLiteral("%1 failed (%2).").arg(operationLabel(operation), detail);
 }
 
 void YouTubeClient::saveToken(const QJsonObject &json, bool preserveRefreshToken, TokenCallback callback)
@@ -80,9 +128,28 @@ void YouTubeClient::exchangeCode(const QString &code, const QString &verifier, c
     request.body = formBody({{"client_id", clientId_}, {"code", code}, {"code_verifier", verifier},
                              {"grant_type", QStringLiteral("authorization_code")}, {"redirect_uri", redirectUri}});
     transport_->send(std::move(request), [this, callback = std::move(callback)](PlatformHttpResult result) mutable {
-        if (!result.ok()) { callback(httpError(result)); return; }
+        if (!result.ok()) { callback(httpError(result, QStringLiteral("token_exchange"))); return; }
         saveToken(QJsonDocument::fromJson(result.body).object(), false, std::move(callback));
     });
+}
+
+void YouTubeClient::loadOwnChannel(ChannelCallback callback)
+{
+    PlatformHttpRequest request;
+    request.url = apiUrl(QStringLiteral("channels"), {{QStringLiteral("part"), QStringLiteral("snippet")},
+                                                       {QStringLiteral("mine"), QStringLiteral("true")}});
+    authorizedRequest(std::move(request), [callback = std::move(callback)](QJsonObject json, QString error) mutable {
+        if (!error.isEmpty()) { callback({}, {}, std::move(error)); return; }
+        const QJsonArray channels = json.value(QStringLiteral("items")).toArray();
+        const QJsonObject channel = channels.isEmpty() ? QJsonObject{} : channels.first().toObject();
+        const QString id = channel.value(QStringLiteral("id")).toString();
+        const QString name = channel.value(QStringLiteral("snippet")).toObject().value(QStringLiteral("title")).toString();
+        if (id.isEmpty() || name.isEmpty()) {
+            callback({}, {}, QStringLiteral("No YouTube channel is available for this Google account."));
+            return;
+        }
+        callback(id, name, {});
+    }, true, QStringLiteral("channel_lookup"));
 }
 
 void YouTubeClient::finishRefresh(const QString &error)
@@ -101,7 +168,7 @@ void YouTubeClient::refresh()
     request.body = formBody({{"client_id", clientId_}, {"refresh_token", refreshToken_},
                              {"grant_type", QStringLiteral("refresh_token")}});
     transport_->send(std::move(request), [this](PlatformHttpResult result) {
-        if (!result.ok()) { finishRefresh(httpError(result)); return; }
+        if (!result.ok()) { finishRefresh(httpError(result, QStringLiteral("token_refresh"))); return; }
         saveToken(QJsonDocument::fromJson(result.body).object(), true,
                   [this](const QString &error) { finishRefresh(error); });
     });
@@ -127,25 +194,25 @@ QUrl YouTubeClient::apiUrl(const QString &path, const QMap<QString, QString> &qu
     return url;
 }
 
-void YouTubeClient::authorizedRequest(PlatformHttpRequest request, JsonCallback callback, bool retry)
+void YouTubeClient::authorizedRequest(PlatformHttpRequest request, JsonCallback callback, bool retry, const QString &operation)
 {
     const QString host = request.url.host();
     if (host != QStringLiteral("www.googleapis.com")) {
         callback({}, QStringLiteral("Unexpected YouTube API host."));
         return;
     }
-    ensureToken([this, request = std::move(request), callback = std::move(callback), retry](QString token, QString error) mutable {
+    ensureToken([this, request = std::move(request), callback = std::move(callback), retry, operation](QString token, QString error) mutable {
         if (!error.isEmpty()) { callback({}, error); return; }
         request.bearerToken = token.toUtf8();
         const PlatformHttpRequest retryRequest = request;
-        transport_->send(std::move(request), [this, request = retryRequest, callback = std::move(callback), retry](PlatformHttpResult result) mutable {
+        transport_->send(std::move(request), [this, request = retryRequest, callback = std::move(callback), retry, operation](PlatformHttpResult result) mutable {
             if (result.status == 401 && retry && !refreshToken_.isEmpty()) {
                 accessToken_.clear();
                 expiresAtMs_ = 0;
-                authorizedRequest(std::move(request), std::move(callback), false);
+                authorizedRequest(std::move(request), std::move(callback), false, operation);
                 return;
             }
-            if (!result.ok()) { callback({}, httpError(result)); return; }
+            if (!result.ok()) { callback({}, httpError(result, operation)); return; }
             const QJsonDocument document = QJsonDocument::fromJson(result.body);
             if (!document.isObject()) { callback({}, QStringLiteral("YouTube returned an invalid response.")); return; }
             callback(document.object(), {});
@@ -157,7 +224,7 @@ void YouTubeClient::get(const QUrl &url, JsonCallback callback)
 {
     PlatformHttpRequest request;
     request.url = url;
-    authorizedRequest(std::move(request), std::move(callback));
+    authorizedRequest(std::move(request), std::move(callback), true, QStringLiteral("api_request"));
 }
 
 void YouTubeClient::post(const QUrl &url, const QJsonObject &body, JsonCallback callback)
@@ -167,7 +234,7 @@ void YouTubeClient::post(const QUrl &url, const QJsonObject &body, JsonCallback 
     request.url = url;
     request.contentType = "application/json";
     request.body = QJsonDocument(body).toJson(QJsonDocument::Compact);
-    authorizedRequest(std::move(request), std::move(callback));
+    authorizedRequest(std::move(request), std::move(callback), true, QStringLiteral("api_request"));
 }
 
 void YouTubeClient::postEmpty(const QUrl &url, JsonCallback callback)
@@ -175,7 +242,7 @@ void YouTubeClient::postEmpty(const QUrl &url, JsonCallback callback)
     PlatformHttpRequest request;
     request.method = "POST";
     request.url = url;
-    authorizedRequest(std::move(request), std::move(callback));
+    authorizedRequest(std::move(request), std::move(callback), true, QStringLiteral("api_request"));
 }
 
 void YouTubeClient::uploadThumbnail(const QString &broadcastId, const QString &path, JsonCallback callback)
@@ -198,5 +265,5 @@ void YouTubeClient::uploadThumbnail(const QString &broadcastId, const QString &p
     request.url.setQuery(query);
     request.contentType = format == "png" ? "image/png" : "image/jpeg";
     request.body = file.readAll();
-    authorizedRequest(std::move(request), std::move(callback));
+    authorizedRequest(std::move(request), std::move(callback), true, QStringLiteral("api_request"));
 }

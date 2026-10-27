@@ -66,15 +66,15 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
         destination->connected = kick_->hasCredentials();
     }
     connect(&oauth_, &OAuthLoopback::authorized, this, [this](const QString &code, const QString &verifier, const QString &redirect) {
-        setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Connecting your YouTube account..."));
+        setPlatformState(QStringLiteral("Exchanging authorization code"), QStringLiteral("Google authorization received. Securely exchanging the authorization code..."));
         youtube_->exchangeCode(code, verifier, redirect, [this](const QString &error) {
-            if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
+            if (!error.isEmpty()) { setPlatformState(QStringLiteral("Token exchange failed"), error); return; }
             loadYouTubeChannel();
         });
     });
     connect(&oauth_, &OAuthLoopback::failed, this, [this](const QString &message) {
         const QString testUserHelp = QStringLiteral(" If Google shows 403 access_denied while this app is in Testing, add your Google account under Google Auth Platform → Audience → Test users.");
-        setPlatformState(QStringLiteral("Error"), message + testUserHelp);
+        setPlatformState(QStringLiteral("Authorization failed"), message + testUserHelp);
     });
     connect(&kickOauth_, &OAuthLoopback::authorized, this, [this](const QString &code, const QString &verifier, const QString &redirect) {
         setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Connecting your Kick account..."));
@@ -459,10 +459,18 @@ QString StudioController::providerConnectionState(const QString &providerName) c
             if (providerName == QStringLiteral("kick")) return QStringLiteral("Connected");
             return QStringLiteral("Ready to stream");
         }
-        if (project_.activeStreamDestinationId == destination.id && platformState_ == QStringLiteral("Authenticating"))
-            return QStringLiteral("Connecting");
+        if (project_.activeStreamDestinationId == destination.id
+            && (platformState_ == QStringLiteral("Authenticating")
+                || platformState_ == QStringLiteral("Exchanging authorization code")
+                || platformState_ == QStringLiteral("Loading YouTube account")))
+            return platformState_ == QStringLiteral("Authenticating") ? QStringLiteral("Waiting for authorization") : platformState_;
+        if (project_.activeStreamDestinationId == destination.id
+            && (platformState_ == QStringLiteral("Authorization failed")
+                || platformState_ == QStringLiteral("Token exchange failed")
+                || platformState_ == QStringLiteral("Account loading failed")))
+            return platformState_;
         if (project_.activeStreamDestinationId == destination.id && platformState_ == QStringLiteral("Error"))
-            return QStringLiteral("Authentication failed");
+            return QStringLiteral("Error");
         return QStringLiteral("Not connected");
     }
     return QStringLiteral("Not configured");
@@ -664,18 +672,9 @@ void StudioController::disconnectYouTube()
 void StudioController::loadYouTubeChannel()
 {
     if (!youtube_) return;
-    setPlatformState(QStringLiteral("Authenticating"), QStringLiteral("Loading your YouTube channel..."));
-    youtube_->get(YouTubeClient::apiUrl(QStringLiteral("channels"), {{"part", QStringLiteral("snippet")}, {"mine", QStringLiteral("true")}}),
-                  [this](const QJsonObject &json, const QString &error) {
-        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
-        const QJsonArray channels = json.value(QStringLiteral("items")).toArray();
-        const QJsonObject channel = channels.isEmpty() ? QJsonObject{} : channels.at(0).toObject();
-        const QString id = channel.value(QStringLiteral("id")).toString();
-        const QString name = channel.value(QStringLiteral("snippet")).toObject().value(QStringLiteral("title")).toString();
-        if (id.isEmpty() || name.isEmpty()) {
-            setPlatformState(QStringLiteral("Error"), QStringLiteral("No YouTube channel is available for this account."));
-            return;
-        }
+    setPlatformState(QStringLiteral("Loading YouTube account"), QStringLiteral("Authorization succeeded. Loading your YouTube channel identity..."));
+    youtube_->loadOwnChannel([this](const QString &id, const QString &name, const QString &error) {
+        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Account loading failed"), error); return; }
         if (StreamDestination *destination = youtubeDestination()) {
             destination->connected = true;
             destination->accountName = name;

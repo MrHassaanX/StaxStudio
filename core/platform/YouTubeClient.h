@@ -13,12 +13,14 @@ class YouTubeClient final : public QObject {
 public:
     using JsonCallback = std::function<void(QJsonObject, QString)>;
     using TokenCallback = std::function<void(QString)>;
+    using ChannelCallback = std::function<void(QString, QString, QString)>;
 
     YouTubeClient(PlatformHttpTransport *transport, CredentialStore *credentials,
                   QString credentialKey, QString clientId, QObject *parent = nullptr);
     [[nodiscard]] bool hasCredentials() const;
     [[nodiscard]] QString clientId() const { return clientId_; }
     void exchangeCode(const QString &code, const QString &verifier, const QString &redirectUri, TokenCallback callback);
+    void loadOwnChannel(ChannelCallback callback);
     void disconnect();
     void get(const QUrl &url, JsonCallback callback);
     void post(const QUrl &url, const QJsonObject &body, JsonCallback callback);
@@ -30,9 +32,10 @@ private:
     void ensureToken(std::function<void(QString, QString)> callback);
     void refresh();
     void saveToken(const QJsonObject &json, bool preserveRefreshToken, TokenCallback callback);
-    void authorizedRequest(PlatformHttpRequest request, JsonCallback callback, bool retry = true);
+    void authorizedRequest(PlatformHttpRequest request, JsonCallback callback, bool retry = true,
+                           const QString &operation = QStringLiteral("api_request"));
     void finishRefresh(const QString &error);
-    static QString httpError(const PlatformHttpResult &result);
+    static QString httpError(const PlatformHttpResult &result, const QString &operation);
 
     PlatformHttpTransport *transport_;
     CredentialStore *credentials_;

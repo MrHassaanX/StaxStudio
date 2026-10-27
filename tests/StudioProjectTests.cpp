@@ -69,6 +69,9 @@ private slots:
     void serializesTwitchAndKickMetadata();
     void validatesOAuthLoopbackState();
     void executesYouTubeLifecycleWithMockTransport();
+    void reportsYouTubeOAuthFailuresSafely();
+    void rejectsMissingYouTubeChannel();
+    void reportsYouTubeCredentialPersistenceFailure();
     void refreshesYouTubeTokensWithoutPersistingThemInProject();
     void executesTwitchDeviceAndChannelLifecycle();
     void executesKickOAuthAndChannelLifecycle();
@@ -474,6 +477,17 @@ public:
         callback(replies.takeFirst());
     }
 };
+
+class FailingCredentialStore final : public CredentialStore {
+public:
+    bool writeSecret(const QString &, const QString &, QString *errorMessage) override
+    {
+        if (errorMessage) *errorMessage = QStringLiteral("Secure credential persistence failed.");
+        return false;
+    }
+    QString readSecret(const QString &, QString *) const override { return {}; }
+    bool deleteSecret(const QString &, QString *) override { return true; }
+};
 }
 
 void StudioProjectTests::validatesOAuthLoopbackState()
@@ -536,9 +550,16 @@ void StudioProjectTests::executesYouTubeLifecycleWithMockTransport()
                         [&](QString value) { error = value; });
     QVERIFY(error.isEmpty());
     QVERIFY(client.hasCredentials());
-    client.get(YouTubeClient::apiUrl(QStringLiteral("channels"), {{"part", QStringLiteral("snippet")}, {"mine", QStringLiteral("true")}}),
-               [&](QJsonObject json, QString value) { error = value; QCOMPARE(json.value("items").toArray().at(0).toObject().value("id").toString(), QStringLiteral("UC123")); });
+    QString channelId;
+    QString channelName;
+    client.loadOwnChannel([&](QString id, QString name, QString value) {
+        channelId = std::move(id);
+        channelName = std::move(name);
+        error = std::move(value);
+    });
     QVERIFY(error.isEmpty());
+    QCOMPARE(channelId, QStringLiteral("UC123"));
+    QCOMPARE(channelName, QStringLiteral("Test Channel"));
     PlatformMetadata metadata;
     metadata.title = QStringLiteral("Test Live");
     metadata.privacy = QStringLiteral("unlisted");
@@ -576,6 +597,77 @@ void StudioProjectTests::executesYouTubeLifecycleWithMockTransport()
     QVERIFY(stored.contains(QStringLiteral("refresh-secret")));
     client.disconnect();
     QVERIFY(credentials.readSecret(QStringLiteral("youtube/test")).isEmpty());
+}
+
+void StudioProjectTests::reportsYouTubeOAuthFailuresSafely()
+{
+    InMemoryCredentialStore credentials;
+    QString error;
+
+    FakePlatformTransport tokenTransport;
+    tokenTransport.replies = {{400, R"({"error":"invalid_grant","error_description":"authorization-code-must-never-appear"})", {}}};
+    YouTubeClient tokenClient(&tokenTransport, &credentials, QStringLiteral("youtube/token-failure"), QStringLiteral("test-client"));
+    tokenClient.exchangeCode(QStringLiteral("private-code"), QStringLiteral("private-verifier"),
+                             QStringLiteral("http://127.0.0.1:10001/oauth/callback"),
+                             [&](QString value) { error = std::move(value); });
+    QVERIFY(error.contains(QStringLiteral("token exchange"), Qt::CaseInsensitive));
+    QVERIFY(error.contains(QStringLiteral("HTTP 400")));
+    QVERIFY(error.contains(QStringLiteral("invalid_grant")));
+    QVERIFY(!error.contains(QStringLiteral("authorization-code-must-never-appear")));
+    QVERIFY(!error.contains(QStringLiteral("private-code")));
+    QVERIFY(!error.contains(QStringLiteral("private-verifier")));
+
+    const QJsonObject stored{{"clientId", QStringLiteral("test-client")}, {"accessToken", QStringLiteral("access")},
+                             {"refreshToken", QStringLiteral("refresh")}, {"expiresAtMs", QDateTime::currentMSecsSinceEpoch() + 3600000}};
+    credentials.writeSecret(QStringLiteral("youtube/scope-failure"), QString::fromUtf8(QJsonDocument(stored).toJson()));
+    FakePlatformTransport scopeTransport;
+    scopeTransport.replies = {{403, R"({"error":{"code":403,"message":"sensitive provider text","errors":[{"reason":"insufficientPermissions"}]}})", {}}};
+    YouTubeClient scopeClient(&scopeTransport, &credentials, QStringLiteral("youtube/scope-failure"), QStringLiteral("test-client"));
+    scopeClient.loadOwnChannel([&](QString, QString, QString value) { error = std::move(value); });
+    QVERIFY(error.contains(QStringLiteral("channel lookup"), Qt::CaseInsensitive));
+    QVERIFY(error.contains(QStringLiteral("HTTP 403")));
+    QVERIFY(error.contains(QStringLiteral("insufficientPermissions")));
+    QVERIFY(!error.contains(QStringLiteral("sensitive provider text")));
+
+    credentials.writeSecret(QStringLiteral("youtube/api-disabled"), QString::fromUtf8(QJsonDocument(stored).toJson()));
+    FakePlatformTransport apiTransport;
+    apiTransport.replies = {{403, R"({"error":{"code":403,"errors":[{"reason":"accessNotConfigured"}]}})", {}}};
+    YouTubeClient apiClient(&apiTransport, &credentials, QStringLiteral("youtube/api-disabled"), QStringLiteral("test-client"));
+    apiClient.loadOwnChannel([&](QString, QString, QString value) { error = std::move(value); });
+    QVERIFY(error.contains(QStringLiteral("accessNotConfigured")));
+    QVERIFY(error.contains(QStringLiteral("Enable YouTube Data API v3")));
+}
+
+void StudioProjectTests::rejectsMissingYouTubeChannel()
+{
+    InMemoryCredentialStore credentials;
+    FakePlatformTransport transport;
+    transport.replies = {{200, R"({"access_token":"access","refresh_token":"refresh","expires_in":3600})", {}},
+                         {200, R"({"items":[]})", {}}};
+    YouTubeClient client(&transport, &credentials, QStringLiteral("youtube/no-channel"), QStringLiteral("test-client"));
+    QString error;
+    client.exchangeCode(QStringLiteral("code"), QStringLiteral("verifier"),
+                        QStringLiteral("http://127.0.0.1:10001/oauth/callback"),
+                        [&](QString value) { error = std::move(value); });
+    QVERIFY(error.isEmpty());
+    client.loadOwnChannel([&](QString, QString, QString value) { error = std::move(value); });
+    QCOMPARE(error, QStringLiteral("No YouTube channel is available for this Google account."));
+}
+
+void StudioProjectTests::reportsYouTubeCredentialPersistenceFailure()
+{
+    FailingCredentialStore credentials;
+    FakePlatformTransport transport;
+    transport.replies = {{200, R"({"access_token":"access-secret","refresh_token":"refresh-secret","expires_in":3600})", {}}};
+    YouTubeClient client(&transport, &credentials, QStringLiteral("youtube/storage-failure"), QStringLiteral("test-client"));
+    QString error;
+    client.exchangeCode(QStringLiteral("private-code"), QStringLiteral("private-verifier"),
+                        QStringLiteral("http://127.0.0.1:10001/oauth/callback"),
+                        [&](QString value) { error = std::move(value); });
+    QCOMPARE(error, QStringLiteral("Secure credential persistence failed."));
+    QVERIFY(!client.hasCredentials());
+    QVERIFY(!error.contains(QStringLiteral("access-secret")));
+    QVERIFY(!error.contains(QStringLiteral("refresh-secret")));
 }
 
 void StudioProjectTests::refreshesYouTubeTokensWithoutPersistingThemInProject()

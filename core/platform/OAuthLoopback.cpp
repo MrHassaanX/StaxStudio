@@ -70,7 +70,7 @@ void OAuthLoopback::acceptConnection()
             const QString verifier = verifier_;
             const QString redirect = redirectUri_;
             const bool success = stateValid && !code.isEmpty() && browserError.isEmpty();
-            const QByteArray page = success ? "<html><body>StaxStudio is connected. You may close this tab.</body></html>"
+            const QByteArray page = success ? "<html><body>Authorization response received. Return to StaxStudio while it finishes connecting your account.</body></html>"
                                             : "<html><body>StaxStudio sign-in failed. Return to the app and try again.</body></html>";
             socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: " + QByteArray::number(page.size()) + "\r\nConnection: close\r\n\r\n" + page);
             socket->disconnectFromHost();
