@@ -9,6 +9,8 @@ struct RecordingSettings final {
     QString outputDirectory;
     QString encoder = QStringLiteral("Auto");
     int frameRate = 60;
+    bool detailedDiagnostics = false;
+    QString diagnosticsDirectory;
 };
 
 struct RecordedVideoFrame final {

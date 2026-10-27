@@ -409,18 +409,20 @@ Item {
                     objectName: "mixerPanel"
                     ColumnLayout {
                         anchors.fill: parent
-                        spacing: 10
-                        StudioSectionHeader { title: ""; subtitle: "Input levels" }
+                        spacing: 3
                         ListView {
                             id: mixerView
                             objectName: "mixerView"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
-                            spacing: 5
+                            orientation: ListView.Horizontal
+                            spacing: 2
+                            ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
                             model: studioController.mixerModel
                             delegate: MixerChannel {
-                                width: mixerView.width
+                                width: 106
+                                height: mixerView.height - (mixerView.contentWidth > mixerView.width ? 10 : 0)
                                 onVolumeChangedByUser: value => studioController.setMixerVolume(channelId, value)
                                 onMuteRequested: value => studioController.setMixerMuted(channelId, value)
                                 onResetVolumeRequested: studioController.setMixerVolume(channelId, 1.0)

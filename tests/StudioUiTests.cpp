@@ -9,6 +9,7 @@
 #include <QAbstractItemModelTester>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlComponent>
 #include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickStyle>
@@ -16,6 +17,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <QElapsedTimer>
+#include <memory>
 #ifdef Q_OS_WIN
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -56,6 +58,9 @@ private slots:
     void dockMouseInteractions();
     void dxgiPointerComposition();
     void streamPageLoadsWithoutWarnings();
+    void streamPageLayoutAtVirtualSizes();
+    void diagnosticsPreferencePersists();
+    void settingsExposesDiagnosticsControl();
 };
 
 void StudioUiTests::streamPageLoadsWithoutWarnings()
@@ -74,9 +79,9 @@ void StudioUiTests::streamPageLoadsWithoutWarnings()
     QCOMPARE(engine.rootObjects().size(), 1);
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     QVERIFY(window);
-    window->resize(1440, 900);
+    window->resize(1280, 720);
     QVERIFY(QTest::qWaitForWindowExposed(window));
-    QString youtubeId, twitchId, kickId;
+    QString youtubeId, twitchId, kickId, customId;
     for (const QVariant &value : controller.streamingProviders()) {
         const QVariantMap item = value.toMap();
         if (item.value(QStringLiteral("provider")).toString() == QStringLiteral("youtube"))
@@ -85,19 +90,109 @@ void StudioUiTests::streamPageLoadsWithoutWarnings()
             twitchId = item.value(QStringLiteral("id")).toString();
         if (item.value(QStringLiteral("provider")).toString() == QStringLiteral("kick"))
             kickId = item.value(QStringLiteral("id")).toString();
+        if (item.value(QStringLiteral("provider")).toString() == QStringLiteral("custom-rtmp"))
+            customId = item.value(QStringLiteral("id")).toString();
     }
     QVERIFY(!youtubeId.isEmpty());
     controller.selectStreamDestination(youtubeId);
+    if (controller.providerConnectionState(QStringLiteral("youtube")) == QStringLiteral("Not configured"))
+        QCOMPARE(controller.platformState(), QStringLiteral("Not configured"));
     QTRY_VERIFY(visualItem(window->contentItem(), QStringLiteral("youtubeControls")));
     QVERIFY(visualItem(window->contentItem(), QStringLiteral("youtubeControls"))->isVisible());
     QVERIFY(!twitchId.isEmpty());
     controller.selectStreamDestination(twitchId);
+    if (controller.providerConnectionState(QStringLiteral("twitch")) == QStringLiteral("Not configured"))
+        QCOMPARE(controller.platformState(), QStringLiteral("Not configured"));
     QTRY_VERIFY(visualItem(window->contentItem(), QStringLiteral("twitchControls")));
     QVERIFY(visualItem(window->contentItem(), QStringLiteral("twitchControls"))->isVisible());
     QVERIFY(!kickId.isEmpty());
     controller.selectStreamDestination(kickId);
+    if (controller.providerConnectionState(QStringLiteral("kick")) == QStringLiteral("Not configured"))
+        QCOMPARE(controller.platformState(), QStringLiteral("Not configured"));
     QTRY_VERIFY(visualItem(window->contentItem(), QStringLiteral("kickControls")));
     QVERIFY(visualItem(window->contentItem(), QStringLiteral("kickControls"))->isVisible());
+    QVERIFY(!customId.isEmpty());
+    controller.selectStreamDestination(customId);
+    QCOMPARE(controller.providerConnectionState(QStringLiteral("custom-rtmp")), QStringLiteral("Ready to stream"));
+}
+
+void StudioUiTests::streamPageLayoutAtVirtualSizes()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    AppController navigation;
+    StudioController controller(directory.path());
+    QQmlEngine engine;
+    engine.rootContext()->setContextProperty("appController", &navigation);
+    engine.rootContext()->setContextProperty("studioController", &controller);
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(STAX_SOURCE_DIR "/ui/qml/Stream.qml")));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QQuickItem host;
+    std::unique_ptr<QObject> pageObject(component.create());
+    auto *page = qobject_cast<QQuickItem *>(pageObject.get());
+    QVERIFY(page);
+    page->setParentItem(&host);
+    for (const QSize size : {QSize(1280, 720), QSize(1600, 900), QSize(1920, 1080), QSize(2560, 1440)}) {
+        // Main's navigation rail occupies 210 logical pixels. The host need not
+        // fit the physical test monitor to validate its QML layout geometry.
+        host.setSize(QSizeF(size.width() - 210, size.height()));
+        QCoreApplication::processEvents();
+        auto *destinations = visualItem(page, QStringLiteral("streamDestinationsPanel"));
+        auto *settings = visualItem(page, QStringLiteral("streamSettingsPanel"));
+        auto *connection = visualItem(page, QStringLiteral("streamConnectionPanel"));
+        auto *action = visualItem(page, QStringLiteral("streamPrimaryAction"));
+        QVERIFY(destinations && settings && connection && action);
+        QVERIFY(destinations->width() >= 170);
+        QVERIFY(settings->width() >= 300);
+        QVERIFY(connection->y() >= settings->y() + settings->height() - 1);
+        const QRectF actionBounds(action->mapToItem(page, QPointF(0, 0)), action->size());
+        QVERIFY2(actionBounds.left() >= 0 && actionBounds.right() <= page->width()
+                 && actionBounds.top() >= 0 && actionBounds.bottom() <= page->height(),
+                 qPrintable(QStringLiteral("Streaming action clipped at %1 x %2").arg(size.width()).arg(size.height())));
+    }
+    page->setParentItem(nullptr);
+}
+
+void StudioUiTests::diagnosticsPreferencePersists()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    {
+        StudioController controller(directory.path());
+        QVERIFY(!controller.detailedRecordingDiagnostics());
+        controller.setDetailedRecordingDiagnostics(true);
+        QVERIFY(controller.detailedRecordingDiagnostics());
+    }
+    StudioController restored(directory.path());
+    QVERIFY(restored.detailedRecordingDiagnostics());
+}
+
+void StudioUiTests::settingsExposesDiagnosticsControl()
+{
+    QTest::failOnWarning(QRegularExpression(".*"));
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    AppController navigation;
+    StudioController controller(directory.path());
+    navigation.setGpuPreviewEnabled(false);
+    navigation.setActivePage(QStringLiteral("settings"));
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("appController", &navigation);
+    engine.rootContext()->setContextProperty("studioController", &controller);
+    engine.load(QUrl::fromLocalFile(QStringLiteral(STAX_SOURCE_DIR "/ui/qml/Main.qml")));
+    QCOMPARE(engine.rootObjects().size(), 1);
+    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *page = visualItem(window->contentItem(), QStringLiteral("settingsPage"));
+    QVERIFY(page);
+    page->setProperty("section", QStringLiteral("Advanced"));
+    auto *toggle = visualItem(page, QStringLiteral("detailedDiagnosticsToggle"));
+    QVERIFY(toggle);
+    QVERIFY(toggle->isVisible());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+                      toggle->mapToScene(QPointF(10, toggle->height() / 2)).toPoint());
+    QTRY_VERIFY(controller.detailedRecordingDiagnostics());
 }
 
 void StudioUiTests::dxgiPointerComposition()
@@ -243,6 +338,8 @@ void StudioUiTests::visibleRowsAndRepeatedLifecycle()
         const QString micSource = role(items, 1, SceneItemListModel::SourceIdRole);
         QTRY_VERIFY(find("sourceRow_" + micItem));
         QTRY_VERIFY(find("mixerRow_" + micSource));
+        QTRY_VERIFY(find("mixerFader_" + micSource));
+        QCOMPARE(find("mixerFader_" + micSource)->property("orientation").toInt(), int(Qt::Vertical));
         QCOMPARE(mixer->rowCount(), 1);
         controller.setMixerVolume(micSource, 0.42);
         controller.setMixerMuted(micSource, true);

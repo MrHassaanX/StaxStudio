@@ -12,10 +12,18 @@ Item {
     property var destinations: studioController.streamingProviders()
     property var destination: destinations.find(d => d.provider === "youtube")
     property bool connected: destination ? destination.connected : false
+    property bool setupRequired: studioController.providerConnectionState("youtube") === "Not configured"
     property string accountName: destination ? destination.accountName : ""
     property var categoryNames: categories.map(c => c.title)
     property var broadcastNames: ["Create New Broadcast"].concat(broadcasts.map(b => b.title + " (" + b.status + ")"))
     property bool creatingBroadcast: broadcastBox.currentIndex <= 0
+    property bool scheduled: scheduleBox.checked && creatingBroadcast
+    property bool recordWhileStreaming: recordBox.checked
+
+    function startOrStop() {
+        if (studioController.youtubeStreamActive) studioController.stopYouTubeStream()
+        else { saveForm(); studioController.goLiveYouTube(recordWhileStreaming) }
+    }
 
     function loadForm() {
         root.metadata = studioController.activeStreamMetadata
@@ -100,7 +108,7 @@ Item {
             }
             Text {
                 Layout.fillWidth: true
-                text: root.connected ? root.accountName : "YouTube is not connected"
+                text: root.connected ? root.accountName : (root.setupRequired ? "Not configured" : "YouTube is not connected")
                 color: root.connected ? "#B7E65C" : "#8FA3A7"
                 font.pixelSize: 12
                 elide: Text.ElideRight
@@ -109,6 +117,7 @@ Item {
                 Layout.fillWidth: true
                 StudioButton {
                     text: root.connected ? "Reconnect" : "Connect YouTube"
+                    enabled: !root.setupRequired
                     onClicked: studioController.connectYouTube()
                 }
                 StudioButton {
@@ -121,6 +130,17 @@ Item {
                     text: "Cancel"
                     onClicked: studioController.cancelYouTubeConnection()
                 }
+            }
+            Text {
+                visible: root.setupRequired
+                Layout.fillWidth: true
+                text: studioController.providerSetupMessage("youtube")
+                color: "#AAB9BC"; font.pixelSize: 12; wrapMode: Text.WordWrap
+            }
+            StudioButton {
+                visible: root.setupRequired
+                text: "Setup guide"
+                onClicked: studioController.openProviderSetupHelp("youtube")
             }
 
             Rectangle { Layout.fillWidth: true; Layout.topMargin: 6; height: 1; color: "#34474A" }
@@ -220,23 +240,6 @@ Item {
                 StudioButton { visible: thumbnailPath.text.length > 0; text: "Remove"; onClicked: thumbnailPath.text = "" }
             }
             StudioCheckBox { id: recordBox; text: "Record Stream" }
-            RowLayout {
-                Layout.fillWidth: true
-                StudioButton { text: "Save"; visible: root.creatingBroadcast; onClicked: root.saveForm() }
-                Item { Layout.fillWidth: true }
-                StudioButton {
-                    text: studioController.youtubeStreamActive ? "Stop Streaming" : (scheduleBox.checked && broadcastBox.currentIndex === 0 ? "Schedule Broadcast" : "Go Live")
-                    enabled: studioController.youtubeStreamActive || (root.connected && studioController.platformState !== "Authenticating"
-                             && studioController.platformState !== "Creating Broadcast"
-                             && studioController.platformState !== "Creating Stream"
-                             && studioController.platformState !== "Connecting"
-                             && studioController.platformState !== "Waiting for YouTube")
-                    onClicked: {
-                        if (studioController.youtubeStreamActive) studioController.stopYouTubeStream()
-                        else { root.saveForm(); studioController.goLiveYouTube(recordBox.checked) }
-                    }
-                }
-            }
             Item { Layout.preferredHeight: 8 }
         }
     }

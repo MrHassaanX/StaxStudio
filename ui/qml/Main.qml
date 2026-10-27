@@ -9,7 +9,7 @@ ApplicationWindow {
     width: Math.min(1440, Screen.desktopAvailableWidth - 32)
     height: Math.min(900, Screen.desktopAvailableHeight - 48)
     minimumWidth: 1280
-    minimumHeight: 760
+    minimumHeight: 640
     visible: true
     title: "StaxStudio"
     color: "#F5F7F8"

@@ -5,15 +5,29 @@ import "components"
 
 Item {
     id: root
+    objectName: "streamSetupPage"
     anchors.fill: parent
     property var destinations: studioController.streamingProviders()
     property string selectedProvider: studioController.activeStreamProvider
+    property string connectionState: studioController.providerConnectionState(selectedProvider)
+    property bool outputBusy: studioController.streamer.state === "Connecting"
+                              || studioController.streamer.state === "Stopping"
+                              || studioController.platformState === "Authenticating"
+                              || studioController.platformState === "Creating Broadcast"
+                              || studioController.platformState === "Creating Stream"
+                              || studioController.platformState === "Connecting"
+                              || studioController.platformState === "Waiting for YouTube"
 
     Connections {
         target: studioController
         function onProjectChanged() {
             root.destinations = studioController.streamingProviders()
             root.selectedProvider = studioController.activeStreamProvider
+            root.connectionState = studioController.providerConnectionState(root.selectedProvider)
+        }
+        function onPlatformStateChanged() {
+            root.destinations = studioController.streamingProviders()
+            root.connectionState = studioController.providerConnectionState(root.selectedProvider)
         }
     }
 
@@ -32,102 +46,62 @@ Item {
                                                 parseInt(fpsBox.currentText || "60"))
     }
 
+    function selectDestination(id) {
+        const candidate = destinations.find(d => d.id === id)
+        if (!candidate || candidate.provider === selectedProvider) return
+        if (selectedProvider === "custom-rtmp") saveSettings()
+        else if (selectedProvider === "youtube") youtubeControls.saveForm()
+        else if (selectedProvider === "twitch") twitchControls.saveForm()
+        else if (selectedProvider === "kick") kickControls.saveForm()
+        studioController.selectStreamDestination(id)
+    }
+
+    function primaryAction() {
+        if (selectedProvider === "custom-rtmp") {
+            saveSettings()
+            studioController.toggleStreaming()
+        } else if (selectedProvider === "youtube") {
+            youtubeControls.startOrStop()
+        } else if (selectedProvider === "twitch") {
+            twitchControls.startOrStop()
+        } else if (selectedProvider === "kick") {
+            kickControls.saveForm()
+            studioController.updateKickChannel()
+        }
+    }
+
     Rectangle { anchors.fill: parent; color: "#0F171A" }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 28
-        spacing: 14
+        anchors.margins: 18
+        spacing: 10
 
         RowLayout {
             Layout.fillWidth: true
+            Layout.preferredHeight: 48
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 2
-                Text { text: "Stream Setup"; color: "#F5F8F8"; font.pixelSize: 24; font.weight: Font.DemiBold }
-                Text { text: "Choose where StaxStudio should send the program output."; color: "#829399"; font.pixelSize: 12 }
+                Text { text: "Stream Setup"; color: "#F5F8F8"; font.pixelSize: 22; font.weight: Font.DemiBold }
+                Text { text: "Destination and broadcast settings"; color: "#829399"; font.pixelSize: 11 }
             }
             Rectangle {
-                Layout.preferredWidth: 170
-                Layout.preferredHeight: 38
-                radius: 5
-                color: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live" ? "#2E4D3B" : "#172328"
-                border.color: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live" ? "#8AAC7D" : "#2F4148"
-                Row {
+                Layout.preferredWidth: 168
+                Layout.preferredHeight: 30
+                radius: 4
+                color: root.connectionState === "Live" ? "#264437" : "#1B292E"
+                border.color: root.connectionState === "Live" ? "#8AAC7D" : "#30434A"
+                Text {
                     anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 8
-                    Rectangle {
-                        width: 8; height: 8; radius: 4
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live" ? "#B7E65C" : "#73878D"
-                    }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live"
-                              ? "LIVE  " + root.formatElapsed(studioController.streamer.elapsedMs)
-                              : (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state)
-                        color: "#EAF0F1"
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
-        }
-
-        StudioPanel {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 120
-            contentMargin: 14
-            RowLayout {
-                anchors.fill: parent
-                spacing: 10
-                Repeater {
-                    model: root.destinations
-                    delegate: Rectangle {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        radius: 6
-                        color: modelData.selected ? "#213B32" : "#142025"
-                        border.color: modelData.selected ? "#8AAC7D" : "#2F4148"
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 6
-                            Row {
-                                spacing: 8
-                                Rectangle {
-                                    width: 8; height: 8; radius: 4
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    color: modelData.connected ? "#B7E65C" : "#73878D"
-                                }
-                                Text {
-                                    text: modelData.label
-                                    color: "#F0F6F6"
-                                    font.pixelSize: 13
-                                    font.weight: Font.DemiBold
-                                    elide: Text.ElideRight
-                                    width: parent.parent.width - 36
-                                }
-                            }
-                            Text {
-                                width: parent.width
-                                text: modelData.accountName && modelData.accountName.length > 0 ? modelData.accountName : (modelData.connected ? "Ready" : "Not connected")
-                                color: "#93A8AC"
-                                font.pixelSize: 11
-                                elide: Text.ElideRight
-                            }
-                            Item { height: 1; width: 1 }
-                            StudioButton {
-                                width: parent.width
-                                implicitHeight: 28
-                                text: modelData.selected ? "Selected" : "Select"
-                                checked: modelData.selected
-                                onClicked: studioController.selectStreamDestination(modelData.id)
-                            }
-                        }
-                    }
+                    anchors.margins: 6
+                    text: root.connectionState
+                    color: root.connectionState === "Live" ? "#B7E65C" : "#D6E2E4"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
                 }
             }
         }
@@ -135,149 +109,204 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 14
+            spacing: 10
 
             StudioPanel {
-                Layout.fillWidth: true
+                id: destinationsPanel
+                objectName: "streamDestinationsPanel"
+                Layout.preferredWidth: 206
+                Layout.minimumWidth: 170
+                Layout.maximumWidth: 240
                 Layout.fillHeight: true
-                contentMargin: 18
+                contentMargin: 10
                 ColumnLayout {
                     anchors.fill: parent
-                    spacing: 12
-                    StudioSectionHeader {
-                        title: root.selectedProvider === "custom-rtmp" ? "Custom RTMP" : (root.selectedProvider === "youtube" ? "YouTube" : (root.selectedProvider === "twitch" ? "Twitch" : "Kick"))
-                        subtitle: root.selectedProvider === "custom-rtmp" ? "Server URL is saved. Stream key stays session-only for now."
-                                  : root.selectedProvider === "youtube" ? "Manage your YouTube broadcast and go live."
-                                  : root.selectedProvider === "twitch" ? "Manage your Twitch channel and go live."
-                                  : "Manage your Kick channel."
+                    spacing: 4
+                    Text {
+                        text: "Destinations"
+                        color: "#EAF0F1"
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        Layout.leftMargin: 5
+                        Layout.bottomMargin: 6
                     }
-
-                    Text { visible: root.selectedProvider === "custom-rtmp"; text: "Server"; color: "#B6C6C9"; font.pixelSize: 12 }
-                    StudioTextField {
-                        id: serverField
-                        visible: root.selectedProvider === "custom-rtmp"
-                        Layout.fillWidth: true
-                        placeholderText: "rtmp://server/app"
-                        text: studioController.streamServerUrl
-                    }
-
-                    Text { visible: root.selectedProvider === "custom-rtmp"; text: "Stream Key"; color: "#B6C6C9"; font.pixelSize: 12 }
-                    StudioTextField {
-                        id: keyField
-                        visible: root.selectedProvider === "custom-rtmp"
-                        Layout.fillWidth: true
-                        placeholderText: "Paste stream key"
-                        text: studioController.streamKey
-                        echoMode: TextInput.Password
-                    }
-
-                    YouTubeControls {
-                        visible: root.selectedProvider === "youtube"
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                    }
-                    TwitchControls {
-                        visible: root.selectedProvider === "twitch"
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                    }
-                    KickControls {
-                        visible: root.selectedProvider === "kick"
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                    }
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        visible: root.selectedProvider === "custom-rtmp"
-                        columns: 2
-                        rowSpacing: 10
-                        columnSpacing: 12
-                        Text { text: "Video Bitrate"; color: "#B6C6C9"; font.pixelSize: 12 }
-                        StudioTextField {
-                            id: videoBitrateField
+                    Repeater {
+                        model: root.destinations
+                        delegate: Rectangle {
+                            required property var modelData
                             Layout.fillWidth: true
-                            text: studioController.streamVideoBitrateKbps.toString()
-                            validator: IntValidator { bottom: 300; top: 50000 }
-                            inputMethodHints: Qt.ImhDigitsOnly
-                        }
-                        Text { text: "Audio Bitrate"; color: "#B6C6C9"; font.pixelSize: 12 }
-                        StudioTextField {
-                            id: audioBitrateField
-                            Layout.fillWidth: true
-                            text: studioController.streamAudioBitrateKbps.toString()
-                            validator: IntValidator { bottom: 64; top: 512 }
-                            inputMethodHints: Qt.ImhDigitsOnly
-                        }
-                        Text { text: "FPS"; color: "#B6C6C9"; font.pixelSize: 12 }
-                        StudioComboBox {
-                            id: fpsBox
-                            Layout.fillWidth: true
-                            model: ["30", "60"]
-                            currentIndex: studioController.streamFrameRate <= 30 ? 0 : 1
+                            Layout.preferredHeight: 55
+                            radius: 4
+                            color: modelData.selected ? "#25443A" : (hoverArea.containsMouse ? "#203139" : "transparent")
+                            border.color: modelData.selected ? "#769877" : "transparent"
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 9
+                                spacing: 7
+                                Rectangle {
+                                    Layout.preferredWidth: 7
+                                    Layout.preferredHeight: 7
+                                    radius: 4
+                                    color: modelData.connectionState === "Live" || modelData.connected ? "#B7E65C" : "#70888D"
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Text { Layout.fillWidth: true; text: modelData.label; color: "#EDF4F4"; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.accountName || modelData.connectionState
+                                        color: "#9DB0B3"
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                            MouseArea {
+                                id: hoverArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: root.selectDestination(modelData.id)
+                                Accessible.name: "Select " + modelData.label
+                            }
                         }
                     }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        visible: root.selectedProvider === "custom-rtmp"
-                        Item { Layout.fillWidth: true }
-                        StudioButton { text: "Save Settings"; onClicked: root.saveSettings() }
-                        StudioButton {
-                            text: studioController.streamer.state === "Live" || studioController.streamer.state === "Connecting" || studioController.streamer.state === "Reconnecting"
-                                  ? "Stop Streaming" : "Start Streaming"
-                            enabled: studioController.streamer.state !== "Stopping"
-                            onClicked: { root.saveSettings(); studioController.toggleStreaming() }
-                        }
-                    }
+                    Item { Layout.fillHeight: true }
                 }
             }
 
             StudioPanel {
-                Layout.preferredWidth: 300
+                id: settingsPanel
+                objectName: "streamSettingsPanel"
+                Layout.fillWidth: true
                 Layout.fillHeight: true
-                contentMargin: 18
+                Layout.minimumWidth: 300
+                contentMargin: 16
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 10
-                    StudioSectionHeader { title: "Status"; subtitle: (root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state) === "Live" ? "Output is live" : "Output is offline" }
-                    Text { Layout.fillWidth: true; text: root.selectedProvider !== "custom-rtmp" ? studioController.platformState : studioController.streamer.state; color: "#EAF0F1"; font.pixelSize: 18; font.weight: Font.DemiBold }
+                    StudioSectionHeader {
+                        title: root.selectedProvider === "custom-rtmp" ? "Custom RTMP"
+                               : root.selectedProvider === "youtube" ? "YouTube"
+                               : root.selectedProvider === "twitch" ? "Twitch" : "Kick"
+                        subtitle: root.selectedProvider === "custom-rtmp"
+                                  ? "Server and encoding settings" : "Account and broadcast settings"
+                    }
+                    ScrollView {
+                        id: customScroll
+                        visible: root.selectedProvider === "custom-rtmp"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        contentWidth: availableWidth
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                        ColumnLayout {
+                            width: customScroll.availableWidth - 4
+                            spacing: 9
+                            Text { text: "Server"; color: "#B6C6C9"; font.pixelSize: 12 }
+                            StudioTextField { id: serverField; Layout.fillWidth: true; placeholderText: "rtmp://server/app"; text: studioController.streamServerUrl }
+                            Text { text: "Stream Key"; color: "#B6C6C9"; font.pixelSize: 12 }
+                            StudioTextField { id: keyField; Layout.fillWidth: true; placeholderText: "Paste stream key"; text: studioController.streamKey; echoMode: TextInput.Password }
+                            Text { text: "The stream key stays in this session and is not saved in the Studio project."; color: "#8FA3A7"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                rowSpacing: 9
+                                columnSpacing: 12
+                                Text { text: "Video Bitrate"; color: "#B6C6C9"; font.pixelSize: 12 }
+                                StudioTextField { id: videoBitrateField; Layout.fillWidth: true; text: studioController.streamVideoBitrateKbps.toString(); validator: IntValidator { bottom: 300; top: 50000 } inputMethodHints: Qt.ImhDigitsOnly }
+                                Text { text: "Audio Bitrate"; color: "#B6C6C9"; font.pixelSize: 12 }
+                                StudioTextField { id: audioBitrateField; Layout.fillWidth: true; text: studioController.streamAudioBitrateKbps.toString(); validator: IntValidator { bottom: 64; top: 512 } inputMethodHints: Qt.ImhDigitsOnly }
+                                Text { text: "FPS"; color: "#B6C6C9"; font.pixelSize: 12 }
+                                StudioComboBox { id: fpsBox; Layout.fillWidth: true; model: ["30", "60"]; currentIndex: studioController.streamFrameRate <= 30 ? 0 : 1 }
+                            }
+                            Item { Layout.preferredHeight: 4 }
+                        }
+                    }
+                    YouTubeControls { id: youtubeControls; visible: root.selectedProvider === "youtube"; Layout.fillWidth: true; Layout.fillHeight: true }
+                    TwitchControls { id: twitchControls; visible: root.selectedProvider === "twitch"; Layout.fillWidth: true; Layout.fillHeight: true }
+                    KickControls { id: kickControls; visible: root.selectedProvider === "kick"; Layout.fillWidth: true; Layout.fillHeight: true }
+                }
+            }
+        }
+
+        StudioPanel {
+            id: connectionPanel
+            objectName: "streamConnectionPanel"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 84
+            contentMargin: 11
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 3
+                RowLayout {
+                    Layout.fillWidth: true
                     Text {
                         Layout.fillWidth: true
-                        visible: root.selectedProvider !== "custom-rtmp" && studioController.statusMessage.length > 0
-                        text: studioController.statusMessage
-                        color: studioController.platformState === "Error" ? "#E7B17B" : "#9BAEB2"
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
-                    }
-                    Text { Layout.fillWidth: true; text: studioController.streamer.state === "Live" ? root.formatElapsed(studioController.streamer.elapsedMs) : "00:00:00"; color: "#B7E65C"; font.pixelSize: 13; font.weight: Font.DemiBold }
-                    Text {
-                        Layout.fillWidth: true
-                        visible: studioController.streamer.errorMessage.length > 0
-                        text: studioController.streamer.errorMessage
-                        color: "#E7B17B"
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
+                        text: root.selectedProvider === "custom-rtmp"
+                              ? studioController.streamer.state
+                              : root.connectionState
+                        color: "#EAF0F1"
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        elide: Text.ElideRight
                     }
                     Text {
-                        Layout.fillWidth: true
-                        text: "Bitrate: " + (studioController.streamer.diagnostics.estimatedBitrateKbps || 0) + " Kbps"
-                        color: "#9BAEB2"
-                        font.pixelSize: 11
+                        text: root.formatElapsed(studioController.streamer.elapsedMs)
+                        color: "#B7E65C"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
                     }
+                    StudioButton {
+                        visible: root.selectedProvider === "custom-rtmp" && studioController.streamer.state === "Idle"
+                        text: "Save"
+                        implicitHeight: 32
+                        onClicked: root.saveSettings()
+                    }
+                    StudioButton {
+                        id: primaryButton
+                        objectName: "streamPrimaryAction"
+                        implicitHeight: 34
+                        text: root.selectedProvider === "custom-rtmp"
+                              ? (studioController.streamer.state === "Live" || studioController.streamer.state === "Connecting" || studioController.streamer.state === "Reconnecting" ? "Stop Streaming" : "Start Streaming")
+                              : root.selectedProvider === "youtube"
+                                ? (studioController.youtubeStreamActive ? "Stop Streaming" : youtubeControls.scheduled ? "Schedule Broadcast" : "Go Live")
+                                : root.selectedProvider === "twitch"
+                                  ? (studioController.twitchStreamActive ? "Stop Streaming" : "Go Live")
+                                  : "Update Channel"
+                        enabled: root.selectedProvider === "custom-rtmp"
+                                 ? studioController.streamer.state !== "Stopping"
+                                 : root.selectedProvider === "youtube"
+                                   ? studioController.youtubeStreamActive || (root.connectionState === "Ready to stream" && !root.outputBusy)
+                                   : root.selectedProvider === "twitch"
+                                     ? studioController.twitchStreamActive || (root.connectionState === "Ready to stream" && !root.outputBusy)
+                                     : root.connectionState === "Connected"
+                        onClicked: root.primaryAction()
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
                     Text {
                         Layout.fillWidth: true
-                        text: "Dropped frames: " + (studioController.streamer.diagnostics.droppedStreamFrames || 0)
-                        color: "#9BAEB2"
+                        text: root.selectedProvider === "custom-rtmp"
+                              ? (studioController.streamer.errorMessage || "RTMP output is offline.")
+                              : root.connectionState === "Not configured"
+                                ? "Configure this platform to connect an account."
+                                : studioController.statusMessage
+                        color: studioController.platformState === "Error" && root.selectedProvider !== "custom-rtmp" ? "#E7B17B" : "#8FA3A7"
                         font.pixelSize: 11
+                        elide: Text.ElideRight
+                        ToolTip.visible: statusHover.containsMouse && text.length > 0
+                        ToolTip.text: text
+                        MouseArea { id: statusHover; anchors.fill: parent; hoverEnabled: true }
                     }
                     Text {
-                        Layout.fillWidth: true
-                        text: "Reconnects: " + (studioController.streamer.diagnostics.reconnectCount || 0)
-                        color: "#9BAEB2"
-                        font.pixelSize: 11
+                        text: "Bitrate " + (studioController.streamer.diagnostics.estimatedBitrateKbps || 0) + " Kbps"
+                              + "   Dropped " + (studioController.streamer.diagnostics.droppedStreamFrames || 0)
+                              + "   Reconnects " + (studioController.streamer.diagnostics.reconnectCount || 0)
+                        color: "#8FA3A7"
+                        font.pixelSize: 10
                     }
-                    Item { Layout.fillHeight: true }
                 }
             }
         }

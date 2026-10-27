@@ -46,4 +46,5 @@ struct AudioRuntime final {
     CaptureState state = CaptureState::Stopped;
     QString message;
     float peakDb = -90.0f;
+    int channelCount = 0;
 };

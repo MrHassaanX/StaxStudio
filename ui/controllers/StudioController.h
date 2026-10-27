@@ -48,6 +48,7 @@ class StudioController final : public QObject
     Q_PROPERTY(int streamFrameRate READ streamFrameRate NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString activeStreamProvider READ activeStreamProvider NOTIFY projectChanged FINAL)
     Q_PROPERTY(QString platformState READ platformState NOTIFY platformStateChanged FINAL)
+    Q_PROPERTY(bool detailedRecordingDiagnostics READ detailedRecordingDiagnostics NOTIFY detailedRecordingDiagnosticsChanged FINAL)
     Q_PROPERTY(QVariantList youtubeBroadcasts READ youtubeBroadcasts NOTIFY projectChanged FINAL)
     Q_PROPERTY(QVariantList youtubeCategories READ youtubeCategories NOTIFY projectChanged FINAL)
     Q_PROPERTY(QVariantMap activeStreamMetadata READ activeStreamMetadata NOTIFY projectChanged FINAL)
@@ -85,6 +86,7 @@ public:
     int streamFrameRate() const;
     QString activeStreamProvider() const;
     QString platformState() const { return platformState_; }
+    bool detailedRecordingDiagnostics() const { return detailedRecordingDiagnostics_; }
     QVariantList youtubeBroadcasts() const { return youtubeBroadcasts_; }
     QVariantList youtubeCategories() const { return youtubeCategories_; }
     QVariantMap activeStreamMetadata() const;
@@ -129,6 +131,11 @@ public:
     Q_INVOKABLE void setProfileName(const QString &name);
     Q_INVOKABLE void showUnavailableAction(const QString &action);
     Q_INVOKABLE void toggleRecording();
+    Q_INVOKABLE void setDetailedRecordingDiagnostics(bool enabled);
+    Q_INVOKABLE bool exportRecordingDiagnostics(const QString &fileUrl);
+    Q_INVOKABLE QString providerConnectionState(const QString &providerName) const;
+    Q_INVOKABLE QString providerSetupMessage(const QString &providerName) const;
+    Q_INVOKABLE void openProviderSetupHelp(const QString &providerName) const;
     Q_INVOKABLE QVariantList streamingProviders() const;
     Q_INVOKABLE QVariantMap providerCapabilities(const QString &providerName) const;
     Q_INVOKABLE void selectStreamDestination(const QString &destinationId);
@@ -160,6 +167,7 @@ signals:
     void statusMessageChanged();
     void streamKeyChanged();
     void platformStateChanged();
+    void detailedRecordingDiagnosticsChanged();
 
 private:
     DockLayout *dockLayout_ = nullptr;
@@ -190,6 +198,8 @@ private:
     StreamingOutput streamer_;
     ProgramRenderEngine programEngine_;
     QString statusMessage_;
+    QString preferencesPath_;
+    bool detailedRecordingDiagnostics_ = false;
     QString streamKey_;
     QtPlatformHttpTransport platformHttp_;
     WindowsCredentialStore credentials_;

@@ -20,6 +20,15 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui GuiPrivate Network Qml Quick Q
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
+set(STAX_GOOGLE_OAUTH_CLIENT_ID "" CACHE STRING "Public Google Desktop OAuth client ID")
+set(STAX_TWITCH_OAUTH_CLIENT_ID "" CACHE STRING "Public Twitch application client ID")
+foreach(client_id STAX_GOOGLE_OAUTH_CLIENT_ID STAX_TWITCH_OAUTH_CLIENT_ID)
+    if(NOT "${${client_id}}" MATCHES "^[A-Za-z0-9._-]*$")
+        message(FATAL_ERROR "${client_id} contains unsupported characters")
+    endif()
+endforeach()
+configure_file(core/platform/AppOAuthConfig.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/AppOAuthConfig.h" @ONLY)
+
 if(NOT DEFINED STAX_FFMPEG_ROOT AND DEFINED ENV{STAX_FFMPEG_ROOT})
     set(STAX_FFMPEG_ROOT "$ENV{STAX_FFMPEG_ROOT}" CACHE PATH "FFmpeg shared development package root")
 endif()
@@ -55,6 +64,8 @@ qt_add_executable(StaxStudio
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/recorder/RecordingDiagnostics.cpp
+    core/recorder/RecordingDiagnostics.h
     core/platform/CredentialStore.cpp
     core/platform/CredentialStore.h
     core/platform/OAuthPkce.cpp
@@ -142,6 +153,7 @@ qt_add_qml_module(StaxStudio
         ui/qml/components/StudioMenu.qml
         ui/qml/components/StudioMenuItem.qml
         ui/qml/components/StudioSlider.qml
+        ui/qml/components/StudioVerticalSlider.qml
         ui/qml/components/StudioTextField.qml
         ui/qml/components/YouTubeControls.qml
         ui/qml/components/TwitchControls.qml
@@ -154,6 +166,7 @@ qt_add_qml_module(StaxStudio
 target_include_directories(StaxStudio
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
         ${STAX_FFMPEG_INCLUDE_DIR}
 )
 
@@ -237,6 +250,8 @@ qt_add_executable(StaxStudioTests
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/recorder/RecordingDiagnostics.cpp
+    core/recorder/RecordingDiagnostics.h
     core/platform/CredentialStore.cpp
     core/platform/CredentialStore.h
     core/platform/OAuthPkce.cpp
@@ -305,6 +320,8 @@ qt_add_executable(StaxStudioUiTests
     core/recorder/RecordingTypes.h
     core/recorder/LocalRecorder.cpp
     core/recorder/LocalRecorder.h
+    core/recorder/RecordingDiagnostics.cpp
+    core/recorder/RecordingDiagnostics.h
     core/platform/CredentialStore.cpp
     core/platform/CredentialStore.h
     core/platform/OAuthPkce.cpp
@@ -348,7 +365,7 @@ qt_add_shaders(StaxStudioUiTests "StaxUiTestCompositorShaders"
     PREFIX "/stax/shaders"
     FILES core/render/shaders/compositor.vert core/render/shaders/compositor.frag
 )
-target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${STAX_FFMPEG_INCLUDE_DIR})
+target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated ${STAX_FFMPEG_INCLUDE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Network Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} d3d11 dxgi dxguid advapi32 ole32 uuid propsys)
 add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)

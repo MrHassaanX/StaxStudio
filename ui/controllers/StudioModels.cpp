@@ -225,9 +225,11 @@ QVariant MixerListModel::data(const QModelIndex &index, int role) const
     if (role == VolumeRole) return channel.volume;
     if (role == MutedRole) return channel.muted;
     if (role == LevelDbRole) return levels_.value(channel.id, -90.0f);
+    if (role == StateRole) return states_.value(channel.id, QStringLiteral("Stopped"));
+    if (role == ChannelCountRole) return channelCounts_.value(channel.id, 0);
     return {};
 }
-QHash<int, QByteArray> MixerListModel::roleNames() const { return {{IdRole, "channelId"}, {NameRole, "name"}, {VolumeRole, "volume"}, {MutedRole, "muted"}, {LevelDbRole, "levelDb"}}; }
+QHash<int, QByteArray> MixerListModel::roleNames() const { return {{IdRole, "channelId"}, {NameRole, "name"}, {VolumeRole, "volume"}, {MutedRole, "muted"}, {LevelDbRole, "levelDb"}, {StateRole, "sourceState"}, {ChannelCountRole, "channelCount"}}; }
 bool MixerListModel::setVolume(const QString &id, double volume)
 {
     if (!project_->setMixerVolume(id, volume)) return false;
@@ -255,6 +257,9 @@ void MixerListModel::synchronize()
         const auto found = std::find_if(wanted.begin(), wanted.end(), [&](const auto &channel) { return channel.id == channels_[row].id; });
         if (found != wanted.end()) continue;
         beginRemoveRows({}, row, row);
+        levels_.remove(channels_[row].id);
+        states_.remove(channels_[row].id);
+        channelCounts_.remove(channels_[row].id);
         channels_.removeAt(row);
         endRemoveRows();
     }
@@ -274,4 +279,16 @@ void MixerListModel::setLevel(const QString &id, const float levelDb)
 {
     levels_.insert(id, levelDb);
     for (int row = 0; row < channels_.size(); ++row) if (channels_[row].id == id) { emit dataChanged(index(row), index(row), {LevelDbRole}); break; }
+}
+
+void MixerListModel::setRuntime(const QString &id, const QString &state, const int channelCount, const float levelDb)
+{
+    states_.insert(id, state);
+    channelCounts_.insert(id, channelCount);
+    levels_.insert(id, levelDb);
+    for (int row = 0; row < channels_.size(); ++row) {
+        if (channels_[row].id != id) continue;
+        emit dataChanged(index(row), index(row), {StateRole, ChannelCountRole, LevelDbRole});
+        break;
+    }
 }

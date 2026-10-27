@@ -58,12 +58,6 @@ Item {
                         font.weight: Font.DemiBold
                     }
 
-                    Text {
-                        text: "FOUNDATION"
-                        color: "#8EA4A8"
-                        font.pixelSize: 10
-                        font.weight: Font.DemiBold
-                    }
                 }
             }
 

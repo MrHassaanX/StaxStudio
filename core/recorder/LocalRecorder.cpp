@@ -1,10 +1,10 @@
 #include "LocalRecorder.h"
+#include "RecordingDiagnostics.h"
 
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QDebug>
-#include <QJsonDocument>
 #include <QScopeGuard>
 #include <QStandardPaths>
 
@@ -87,6 +87,9 @@ bool LocalRecorder::start(const RecordingSettings &settings, const QSize size)
         submittedVideoFrames_ = droppedVideoFrames_ = submittedAudioBlocks_ = droppedAudioBlocks_ = encodedAudioFrames_ = 0;
         firstAudioTimestampNs_ = lastAudioTimestampNs_ = firstVideoTimestampNs_ = lastVideoTimestampNs_ = 0;
         errorMessage_.clear();
+        detailedDiagnostics_ = settings.detailedDiagnostics;
+        diagnosticsDirectory_ = settings.diagnosticsDirectory;
+        diagnosticsWritten_ = false;
         programSize_ = size;
         frameRate_ = qBound(1, settings.frameRate, 60);
         state_ = RecordingState::Starting;
@@ -108,11 +111,21 @@ void LocalRecorder::stop()
     }
     emit stateChanged();
     if (workerThread_.joinable()) workerThread_.join();
-    qInfo().noquote() << QStringLiteral("Recorder stop diagnostics: %1").arg(QString::fromUtf8(QJsonDocument::fromVariant(diagnostics()).toJson(QJsonDocument::Compact)));
-    QFile log(outputPath()+QStringLiteral(".diagnostics.jsonl"));
-    if(log.open(QIODevice::WriteOnly|QIODevice::Append)) {
-        auto summary=diagnostics(); summary.insert("event","stop");
-        log.write(QJsonDocument::fromVariant(summary).toJson(QJsonDocument::Compact)); log.write("\n");
+    bool writeDiagnostics = false;
+    QString path, directory;
+    {
+        QMutexLocker lock(&mutex_);
+        writeDiagnostics = detailedDiagnostics_ && !diagnosticsWritten_ && !outputPath_.isEmpty();
+        if (writeDiagnostics) diagnosticsWritten_ = true;
+        path = outputPath_;
+        directory = diagnosticsDirectory_;
+    }
+    if (writeDiagnostics && QFileInfo::exists(path)) {
+        QVariantMap summary = diagnostics();
+        summary.insert(QStringLiteral("event"), QStringLiteral("stop"));
+        QString error;
+        if (!RecordingDiagnostics::writeEvent(path, summary, directory, &error))
+            qWarning().noquote() << QStringLiteral("Unable to save recording diagnostics: %1").arg(error);
     }
 }
 

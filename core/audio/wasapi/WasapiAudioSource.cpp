@@ -109,7 +109,7 @@ void WasapiAudioSource::run()
     client->GetService(__uuidof(ISimpleAudioVolume), reinterpret_cast<void **>(&sessionVolume));
     client->GetService(__uuidof(IAudioStreamVolume), reinterpret_cast<void **>(&streamVolume));
     auto cleanupVolumes = qScopeGuard([&] { release(sessionVolume); release(streamVolume); });
-    { QMutexLocker lock(&mutex_); runtime_ = {CaptureState::Active, {}, -90}; }
+    { QMutexLocker lock(&mutex_); runtime_ = {CaptureState::Active, {}, -90, format->nChannels}; }
     { QMutexLocker lock(&mutex_); captureFormat_ = QStringLiteral("%1 Hz, %2 ch, %3-bit %4")
         .arg(format->nSamplesPerSec).arg(format->nChannels).arg(format->wBitsPerSample)
         .arg(isFloat ? QStringLiteral("float") : QStringLiteral("PCM")); }

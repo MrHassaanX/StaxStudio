@@ -18,6 +18,7 @@
 #include "core/render/CompositorScene.h"
 #include "core/render/ProgramFrameMath.h"
 #include "core/recorder/LocalRecorder.h"
+#include "core/recorder/RecordingDiagnostics.h"
 #include "core/streaming/StreamingOutput.h"
 #include "core/streaming/StreamingTypes.h"
 #include "ui/controllers/StudioModels.h"
@@ -87,6 +88,7 @@ private slots:
     void writesPlayableMkv();
     void writesCompleteSixtySecondMkvWithoutPreview();
     void keepsAacTimelineBoundToAudioTimestamps();
+    void recordingDiagnosticsStayOutOfVideoFolder();
 };
 
 void StudioProjectTests::programMixerAlignsAndBoundsSources()
@@ -1415,6 +1417,7 @@ void StudioProjectTests::writesPlayableMkv()
     QCOMPARE(recorder.stateName(), QStringLiteral("Idle"));
     QCOMPARE(recorder.elapsedMs(), 0LL);
     QVERIFY(QFileInfo::exists(recorder.outputPath()));
+    QVERIFY(!QFileInfo::exists(recorder.outputPath() + QStringLiteral(".diagnostics.jsonl")));
     QVERIFY(QFileInfo(recorder.outputPath()).size() > 1024);
 
     AVFormatContext *input = nullptr;
@@ -1482,6 +1485,47 @@ void StudioProjectTests::writesPlayableMkv()
     QVERIFY(recorder.elapsedMs() > 0);
     recorder.stop();
     QCOMPARE(recorder.elapsedMs(), 0LL);
+}
+
+void StudioProjectTests::recordingDiagnosticsStayOutOfVideoFolder()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString videos = directory.filePath(QStringLiteral("videos"));
+    const QString logs = directory.filePath(QStringLiteral("logs"));
+    RecordingSettings settings;
+    settings.outputDirectory = videos;
+    settings.detailedDiagnostics = true;
+    settings.diagnosticsDirectory = logs;
+    LocalRecorder recorder;
+    QVERIFY(recorder.start(settings, QSize(64, 64)));
+    QTRY_COMPARE(recorder.stateName(), QStringLiteral("Recording"));
+    recorder.submitVideoFrame({QImage(64, 64, QImage::Format_ARGB32), 0});
+    QTest::qWait(100);
+    recorder.stop();
+    const QString media = recorder.outputPath();
+    QVERIFY(QFileInfo::exists(media));
+    QVERIFY(!QFileInfo::exists(media + QStringLiteral(".diagnostics.jsonl")));
+    const QString log = RecordingDiagnostics::logPath(media, logs);
+    QVERIFY(QFileInfo::exists(log));
+    QFile logFile(log);
+    QVERIFY(logFile.open(QIODevice::ReadOnly));
+    QVERIFY(logFile.readAll().contains("\"event\":\"stop\""));
+    logFile.close();
+
+    // Simulate a legacy log that accidentally included credentials. Export must scrub it.
+    QVERIFY(logFile.open(QIODevice::WriteOnly | QIODevice::Append));
+    QVERIFY(logFile.write("{\"refreshToken\":\"private-refresh\",\"nested\":{\"streamKey\":\"private-stream\"},\"message\":\"Bearer private-bearer\"}\n") > 0);
+    logFile.close();
+    const QString exported = directory.filePath(QStringLiteral("export.jsonl"));
+    QVERIFY(RecordingDiagnostics::exportLatest(exported, logs));
+    QFile exportFile(exported);
+    QVERIFY(exportFile.open(QIODevice::ReadOnly));
+    const QByteArray output = exportFile.readAll();
+    QVERIFY(output.contains("\"event\":\"stop\""));
+    QVERIFY(!output.contains("private-refresh"));
+    QVERIFY(!output.contains("private-stream"));
+    QVERIFY(!output.contains("private-bearer"));
 }
 
 void StudioProjectTests::writesCompleteSixtySecondMkvWithoutPreview()

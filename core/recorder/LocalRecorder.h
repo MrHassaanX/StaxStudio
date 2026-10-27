@@ -64,6 +64,9 @@ private:
     quint64 encodedVideoFrames_ = 0;
     qint64 lastEncodedPts_ = -1;
     QVariantMap programDiagnostics_;
+    bool detailedDiagnostics_ = false;
+    bool diagnosticsWritten_ = false;
+    QString diagnosticsDirectory_;
     quint64 droppedVideoFrames_ = 0;
     quint64 submittedAudioBlocks_ = 0;
     quint64 droppedAudioBlocks_ = 0;

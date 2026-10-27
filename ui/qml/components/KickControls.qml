@@ -8,6 +8,7 @@ Item {
     property var destinations: studioController.streamingProviders()
     property var destination: destinations.find(d => d.provider === "kick")
     property bool connected: destination ? destination.connected : false
+    property bool setupRequired: studioController.providerConnectionState("kick") === "Not configured"
     property var categories: studioController.kickCategories
 
     function loadForm() {
@@ -43,14 +44,14 @@ Item {
             Text { text: "Account"; color: "#EAF0F1"; font.pixelSize: 14; font.weight: Font.DemiBold }
             Text {
                 Layout.fillWidth: true
-                text: root.connected ? root.destination.accountName : "Kick is not connected"
+                text: root.connected ? root.destination.accountName : (root.setupRequired ? "Not configured" : "Kick is not connected")
                 color: root.connected ? "#B7E65C" : "#8FA3A7"
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
             RowLayout {
                 Layout.fillWidth: true
-                StudioButton { text: root.connected ? "Reconnect" : "Connect Kick"; onClicked: studioController.connectKick() }
+                StudioButton { text: root.connected ? "Reconnect" : "Connect Kick"; enabled: !root.setupRequired; onClicked: studioController.connectKick() }
                 StudioButton { text: "Disconnect"; visible: root.connected; onClicked: studioController.disconnectKick() }
                 StudioButton {
                     text: "Cancel"
@@ -58,9 +59,11 @@ Item {
                     onClicked: studioController.cancelKickConnection()
                 }
             }
+            Text { visible: root.setupRequired; Layout.fillWidth: true; text: studioController.providerSetupMessage("kick"); color: "#AAB9BC"; font.pixelSize: 12; wrapMode: Text.WordWrap }
+            StudioButton { visible: root.setupRequired; text: "Setup guide"; onClicked: studioController.openProviderSetupHelp("kick") }
             Text {
                 Layout.fillWidth: true
-                text: "Kick sign-in requires your own developer app credentials and a registered localhost callback."
+                text: "Use your own Kick developer app; no confidential client secret is bundled."
                 color: "#93A8AC"
                 font.pixelSize: 11
                 wrapMode: Text.WordWrap
@@ -93,16 +96,6 @@ Item {
                 elide: Text.ElideRight
             }
             StudioTextField { id: categoryIdField; visible: false }
-            RowLayout {
-                Layout.fillWidth: true
-                StudioButton { text: "Save"; onClicked: root.saveForm() }
-                Item { Layout.fillWidth: true }
-                StudioButton {
-                    text: "Update Channel"
-                    enabled: root.connected
-                    onClicked: { root.saveForm(); studioController.updateKickChannel() }
-                }
-            }
             Text {
                 Layout.fillWidth: true
                 text: "Kick's documented channel API does not provide an ingest URL or stream key. Use Custom RTMP for streaming."

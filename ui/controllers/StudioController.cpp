@@ -3,13 +3,18 @@
 #include "core/render/CompositorScene.h"
 #include "core/render/ProgramFrameMath.h"
 #include "core/platform/PlatformProviders.h"
+#include "core/recorder/RecordingDiagnostics.h"
+#include "AppOAuthConfig.h"
 #include <algorithm>
 #include <QDesktopServices>
 #include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
+#include <QSettings>
 #include <QUrlQuery>
 
 namespace {
@@ -33,16 +38,21 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
       statusMessage_(QStringLiteral("Studio setup is saved locally. Media capture is not connected yet."))
 {
     dockLayout_ = new DockLayout(storageDirectory, this);
+    preferencesPath_ = QFileInfo(repository_.filePath()).dir().filePath(QStringLiteral("preferences.ini"));
+    detailedRecordingDiagnostics_ = QSettings(preferencesPath_, QSettings::IniFormat)
+                                        .value(QStringLiteral("recording/detailedDiagnostics"), false).toBool();
     if (StreamDestination *destination = youtubeDestination()) {
+        const QString clientId = qEnvironmentVariable("STAX_GOOGLE_CLIENT_ID").trimmed();
         youtube_ = std::make_unique<YouTubeClient>(&platformHttp_, &credentials_,
             QStringLiteral("youtube/") + destination->id,
-            qEnvironmentVariable("STAX_GOOGLE_CLIENT_ID").trimmed());
+            clientId.isEmpty() ? QString::fromUtf8(STAX_GOOGLE_OAUTH_CLIENT_ID) : clientId);
         destination->connected = youtube_->hasCredentials();
     }
     if (StreamDestination *destination = twitchDestination()) {
+        const QString clientId = qEnvironmentVariable("STAX_TWITCH_CLIENT_ID").trimmed();
         twitch_ = std::make_unique<TwitchClient>(&platformHttp_, &credentials_,
             QStringLiteral("twitch/") + destination->id,
-            qEnvironmentVariable("STAX_TWITCH_CLIENT_ID").trimmed());
+            clientId.isEmpty() ? QString::fromUtf8(STAX_TWITCH_OAUTH_CLIENT_ID) : clientId);
         destination->connected = twitch_->hasCredentials();
     }
     if (StreamDestination *destination = kickDestination()) {
@@ -84,7 +94,12 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
         }
     });
     connect(&visualSources_, &VisualSourceManager::sourceStateChanged, this, [this](const QString &) { emit projectChanged(); });
-    connect(&audioSources_, &AudioInputManager::metersChanged, this, [this] { for (const MixerChannel &channel : project_.mixerChannels) mixerModel_.setLevel(channel.id, audioSources_.levelDb(channel.id)); });
+    connect(&audioSources_, &AudioInputManager::metersChanged, this, [this] {
+        for (const MixerChannel &channel : project_.mixerChannels) {
+            const AudioRuntime runtime = audioSources_.runtime(channel.id);
+            mixerModel_.setRuntime(channel.id, captureStateName(runtime.state), runtime.channelCount, runtime.peakDb);
+        }
+    });
     visualSources_.synchronizeSources(project_.sources);
     programEngine_.setRecorder(&recorder_);
     programEngine_.setStreamer(&streamer_);
@@ -377,6 +392,7 @@ void StudioController::toggleRecording()
         return;
     }
     RecordingSettings settings;
+    settings.detailedDiagnostics = detailedRecordingDiagnostics_;
     audioSources_.discardPendingBlocks();
     updateProgramAudioSink();
     if (!recorder_.start(settings, {project_.programResolution.width, project_.programResolution.height})) {
@@ -385,6 +401,87 @@ void StudioController::toggleRecording()
     } else {
         updateProgramAudioSink();
     }
+}
+
+void StudioController::setDetailedRecordingDiagnostics(const bool enabled)
+{
+    if (detailedRecordingDiagnostics_ == enabled) return;
+    QSettings preferences(preferencesPath_, QSettings::IniFormat);
+    preferences.setValue(QStringLiteral("recording/detailedDiagnostics"), enabled);
+    preferences.sync();
+    if (preferences.status() != QSettings::NoError) {
+        statusMessage_ = QStringLiteral("Unable to save diagnostics preference.");
+        emit statusMessageChanged();
+        return;
+    }
+    detailedRecordingDiagnostics_ = enabled;
+    emit detailedRecordingDiagnosticsChanged();
+}
+
+bool StudioController::exportRecordingDiagnostics(const QString &fileUrl)
+{
+    const QUrl url(fileUrl);
+    const QString path = url.isLocalFile() ? url.toLocalFile() : fileUrl;
+    QString error;
+    const bool saved = RecordingDiagnostics::exportLatest(path, {}, &error);
+    statusMessage_ = saved ? QStringLiteral("Diagnostics exported to %1").arg(path) : error;
+    emit statusMessageChanged();
+    return saved;
+}
+
+QString StudioController::providerConnectionState(const QString &providerName) const
+{
+    if (providerName == QStringLiteral("custom-rtmp")) {
+        if (streamer_.state() == StreamingState::Live) return QStringLiteral("Live");
+        if (streamer_.state() == StreamingState::Connecting || streamer_.state() == StreamingState::Reconnecting)
+            return QStringLiteral("Connecting");
+        return QStringLiteral("Ready to stream");
+    }
+    bool configured = false;
+    if (providerName == QStringLiteral("youtube")) configured = youtube_ && !youtube_->clientId().isEmpty();
+    if (providerName == QStringLiteral("twitch")) configured = twitch_ && !twitch_->clientId().isEmpty();
+    if (providerName == QStringLiteral("kick")) {
+        bool validPort = false;
+        const quint16 port = qEnvironmentVariable("STAX_KICK_REDIRECT_PORT").toUShort(&validPort);
+        configured = kick_ && kick_->configured() && validPort && port != 0;
+    }
+    if (!configured) return QStringLiteral("Not configured");
+    for (const StreamDestination &destination : project_.streamDestinations) {
+        if (platformProviderName(destination.provider) != providerName) continue;
+        if (destination.connected) {
+            if ((providerName == QStringLiteral("youtube") && !youtubeBroadcastId_.isEmpty() && platformState_ == QStringLiteral("Live"))
+                || (providerName == QStringLiteral("twitch") && twitchStreamActive_ && platformState_ == QStringLiteral("Live")))
+                return QStringLiteral("Live");
+            if (providerName == QStringLiteral("kick")) return QStringLiteral("Connected");
+            return QStringLiteral("Ready to stream");
+        }
+        if (project_.activeStreamDestinationId == destination.id && platformState_ == QStringLiteral("Authenticating"))
+            return QStringLiteral("Connecting");
+        if (project_.activeStreamDestinationId == destination.id && platformState_ == QStringLiteral("Error"))
+            return QStringLiteral("Authentication failed");
+        return QStringLiteral("Not connected");
+    }
+    return QStringLiteral("Not configured");
+}
+
+QString StudioController::providerSetupMessage(const QString &providerName) const
+{
+    if (providerName == QStringLiteral("youtube"))
+        return QStringLiteral("This build needs a public Google Desktop OAuth Client ID and YouTube Data API access. Set STAX_GOOGLE_CLIENT_ID for development or configure the application Client ID at build time.");
+    if (providerName == QStringLiteral("twitch"))
+        return QStringLiteral("This build needs a registered public Twitch application Client ID. Set STAX_TWITCH_CLIENT_ID for development or configure it at build time.");
+    if (providerName == QStringLiteral("kick"))
+        return QStringLiteral("Kick currently requires developer app credentials and a registered localhost callback. A consumer desktop release needs a secure token-exchange backend; no secret is bundled here.");
+    return {};
+}
+
+void StudioController::openProviderSetupHelp(const QString &providerName) const
+{
+    QUrl url;
+    if (providerName == QStringLiteral("youtube")) url = QUrl(QStringLiteral("https://developers.google.com/identity/protocols/oauth2/native-app"));
+    if (providerName == QStringLiteral("twitch")) url = QUrl(QStringLiteral("https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/"));
+    if (providerName == QStringLiteral("kick")) url = QUrl(QStringLiteral("https://github.com/KickEngineering/KickDevDocs"));
+    if (url.isValid()) QDesktopServices::openUrl(url);
 }
 
 QVariantList StudioController::streamingProviders() const
@@ -398,6 +495,7 @@ QVariantList StudioController::streamingProviders() const
                                   {"accountName", destination.accountName},
                                   {"enabled", destination.enabled},
                                   {"connected", destination.connected},
+                                  {"connectionState", providerConnectionState(platformProviderName(destination.provider))},
                                   {"selected", destination.id == project_.activeStreamDestinationId},
                                   {"summary", redactedDestinationSummary(destination)},
                                   {"capabilities", capabilitiesToVariant(capabilities)}});
@@ -424,9 +522,11 @@ void StudioController::selectStreamDestination(const QString &destinationId)
         project_.activeStreamDestinationId = destinationId;
         save();
         emit projectChanged();
-        if (destination.provider != PlatformProviderId::CustomRtmp)
-            setPlatformState(destination.connected ? QStringLiteral("Ready") : QStringLiteral("Idle"),
-                             destination.connected ? QStringLiteral("Account connected.") : QStringLiteral("Connect an account to continue."));
+        const QString provider = platformProviderName(destination.provider);
+        const QString connection = providerConnectionState(provider);
+        setPlatformState(connection, connection == QStringLiteral("Not configured")
+            ? providerSetupMessage(provider)
+            : destination.connected ? QStringLiteral("Account connected.") : QStringLiteral("Connect an account to continue."));
         return;
     }
 }
@@ -512,7 +612,7 @@ void StudioController::setPlatformState(const QString &state, const QString &mes
 void StudioController::connectYouTube()
 {
     if (!youtube_ || youtube_->clientId().isEmpty()) {
-        setPlatformState(QStringLiteral("Error"), QStringLiteral("Set STAX_GOOGLE_CLIENT_ID to a Google Desktop OAuth Client ID, then restart StaxStudio."));
+        setPlatformState(QStringLiteral("Not configured"), providerSetupMessage(QStringLiteral("youtube")));
         return;
     }
     if (youtube_->hasCredentials()) { loadYouTubeChannel(); return; }
@@ -806,6 +906,7 @@ void StudioController::startYouTubeIngest(const QString &broadcastId, const QJso
         updateProgramAudioSink();
         if (recordWithYouTube_ && recorder_.state() != RecordingState::Recording) {
             RecordingSettings recording;
+            recording.detailedDiagnostics = detailedRecordingDiagnostics_;
             recordingStartedForStream_ = recorder_.start(recording, project_.programResolution.size());
             updateProgramAudioSink();
             if (!recordingStartedForStream_) {
@@ -904,7 +1005,7 @@ StreamDestination *StudioController::twitchDestination()
 void StudioController::connectTwitch()
 {
     if (!twitch_ || twitch_->clientId().isEmpty()) {
-        setPlatformState(QStringLiteral("Error"), QStringLiteral("Set STAX_TWITCH_CLIENT_ID to your Twitch application Client ID, then restart StaxStudio."));
+        setPlatformState(QStringLiteral("Not configured"), providerSetupMessage(QStringLiteral("twitch")));
         return;
     }
     if (twitch_->hasCredentials()) { loadTwitchAccount(); return; }
@@ -1095,6 +1196,7 @@ void StudioController::goLiveTwitch(const bool recordWhileStreaming)
                 updateProgramAudioSink();
                 if (recordWithTwitch_ && recorder_.state() != RecordingState::Recording) {
                     RecordingSettings recording;
+                    recording.detailedDiagnostics = detailedRecordingDiagnostics_;
                     twitchRecordingStarted_ = recorder_.start(recording, project_.programResolution.size());
                     updateProgramAudioSink();
                     if (!twitchRecordingStarted_) {
@@ -1152,7 +1254,7 @@ void StudioController::connectKick()
     bool validPort = false;
     const quint16 port = qEnvironmentVariable("STAX_KICK_REDIRECT_PORT").toUShort(&validPort);
     if (!kick_ || !kick_->configured() || !validPort || port == 0) {
-        setPlatformState(QStringLiteral("Error"), QStringLiteral("Configure STAX_KICK_CLIENT_ID, STAX_KICK_CLIENT_SECRET, and STAX_KICK_REDIRECT_PORT for your own Kick app. Register http://localhost:<port>/oauth/callback in Kick first, then restart StaxStudio."));
+        setPlatformState(QStringLiteral("Not configured"), providerSetupMessage(QStringLiteral("kick")));
         return;
     }
     if (kick_->hasCredentials()) { loadKickAccount(); return; }

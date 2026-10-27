@@ -8,8 +8,15 @@ Item {
     property var destinations: studioController.streamingProviders()
     property var destination: destinations.find(d => d.provider === "twitch")
     property bool connected: destination ? destination.connected : false
+    property bool setupRequired: studioController.providerConnectionState("twitch") === "Not configured"
     property var categories: studioController.twitchCategories
     property var metadata: studioController.activeStreamMetadata
+    property bool recordWhileStreaming: recordBox.checked
+
+    function startOrStop() {
+        if (studioController.twitchStreamActive) studioController.stopTwitchStream()
+        else { saveForm(); studioController.goLiveTwitch(recordWhileStreaming) }
+    }
 
     function loadForm() {
         metadata = studioController.activeStreamMetadata
@@ -51,14 +58,14 @@ Item {
             Text { text: "Account"; color: "#EAF0F1"; font.pixelSize: 14; font.weight: Font.DemiBold }
             Text {
                 Layout.fillWidth: true
-                text: root.connected ? root.destination.accountName : "Twitch is not connected"
+                text: root.connected ? root.destination.accountName : (root.setupRequired ? "Not configured" : "Twitch is not connected")
                 color: root.connected ? "#B7E65C" : "#8FA3A7"
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
             RowLayout {
                 Layout.fillWidth: true
-                StudioButton { text: root.connected ? "Reconnect" : "Connect Twitch"; onClicked: studioController.connectTwitch() }
+                StudioButton { text: root.connected ? "Reconnect" : "Connect Twitch"; enabled: !root.setupRequired; onClicked: studioController.connectTwitch() }
                 StudioButton { text: "Disconnect"; visible: root.connected; onClicked: studioController.disconnectTwitch() }
                 StudioButton {
                     text: "Cancel"
@@ -66,6 +73,8 @@ Item {
                     onClicked: studioController.cancelTwitchConnection()
                 }
             }
+            Text { visible: root.setupRequired; Layout.fillWidth: true; text: studioController.providerSetupMessage("twitch"); color: "#AAB9BC"; font.pixelSize: 12; wrapMode: Text.WordWrap }
+            StudioButton { visible: root.setupRequired; text: "Setup guide"; onClicked: studioController.openProviderSetupHelp("twitch") }
             Text {
                 Layout.fillWidth: true
                 visible: studioController.twitchUserCode.length > 0
@@ -121,19 +130,6 @@ Item {
             Text { text: "Tags"; color: "#B6C6C9"; font.pixelSize: 12 }
             StudioTextField { id: tagsField; Layout.fillWidth: true; placeholderText: "Comma-separated tags" }
             StudioCheckBox { id: recordBox; text: "Record Stream" }
-            RowLayout {
-                Layout.fillWidth: true
-                StudioButton { text: "Save"; onClicked: root.saveForm() }
-                Item { Layout.fillWidth: true }
-                StudioButton {
-                    text: studioController.twitchStreamActive ? "Stop Streaming" : "Go Live"
-                    enabled: studioController.twitchStreamActive || root.connected
-                    onClicked: {
-                        if (studioController.twitchStreamActive) studioController.stopTwitchStream()
-                        else { root.saveForm(); studioController.goLiveTwitch(recordBox.checked) }
-                    }
-                }
-            }
             Item { Layout.preferredHeight: 8 }
         }
     }

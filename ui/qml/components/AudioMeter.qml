@@ -4,23 +4,40 @@ Item {
     id: root
     property bool muted: false
     property double levelDb: -90
-    implicitWidth: 27
-    implicitHeight: 21
+    implicitWidth: 42
+    implicitHeight: 72
+    readonly property real fillFraction: Math.max(0, Math.min(1, (levelDb + 90) / 90))
 
-    Row {
-        anchors.fill: parent
-        spacing: 2
+    Column {
+        x: 0
+        y: 0
+        width: 25
+        height: parent.height
         Repeater {
-            model: 4
-            delegate: Rectangle {
-                required property int index
-                width: 4
-                height: Math.max(3, parent.height * Math.max(0, Math.min(1, (root.levelDb + 60) / 60)))
-                anchors.bottom: parent.bottom
-                radius: 1
-                color: root.muted ? "#3F3535" : (index === 3 ? "#56676C" : "#34474C")
+            model: ["0", "-24", "-48", "-90"]
+            delegate: Text {
+                required property string modelData
+                width: 25
+                height: root.height / 4
+                text: modelData
+                color: "#81969B"
+                font.pixelSize: 8
             }
         }
-        Text { text: "IN"; color: root.muted ? "#796966" : "#71858B"; font.pixelSize: 8; anchors.verticalCenter: parent.verticalCenter }
+    }
+    Rectangle {
+        x: 27
+        y: 1
+        width: 11
+        height: Math.max(0, parent.height - 2)
+        radius: 2
+        color: "#25343A"
+        Rectangle {
+            width: parent.width
+            height: root.fillFraction * parent.height
+            y: parent.height - height
+            radius: 2
+            color: root.muted ? "#566467" : root.levelDb > -6 ? "#DB7469" : root.levelDb > -18 ? "#D6AA63" : "#8EBC7A"
+        }
     }
 }

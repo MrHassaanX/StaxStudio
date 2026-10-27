@@ -1,0 +1,5 @@
+#pragma once
+
+// Public application identifiers only. Never configure a client secret here.
+#define STAX_GOOGLE_OAUTH_CLIENT_ID "@STAX_GOOGLE_OAUTH_CLIENT_ID@"
+#define STAX_TWITCH_OAUTH_CLIENT_ID "@STAX_TWITCH_OAUTH_CLIENT_ID@"

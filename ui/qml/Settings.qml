@@ -1,150 +1,75 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
+import "components"
 
 Item {
+    id: root
+    objectName: "settingsPage"
     anchors.fill: parent
+    property string section: "General"
+    property string exportMessage: ""
 
-    Column {
-        anchors {
-            fill: parent
-            margins: 52
+    FileDialog {
+        id: exportDialog
+        title: "Export recording diagnostics"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["JSON Lines (*.jsonl)"]
+        onAccepted: {
+            root.exportMessage = studioController.exportRecordingDiagnostics(selectedFile.toString())
+                               ? "Diagnostics exported." : studioController.statusMessage
         }
-        spacing: 0
+    }
 
-        Text {
-            text: "Settings"
-            color: "#13202A"
-            font.pixelSize: 30
-            font.weight: Font.DemiBold
+    Rectangle { anchors.fill: parent; color: "#0F171A" }
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 24
+        spacing: 16
+        Text { text: "Settings"; color: "#F5F8F8"; font.pixelSize: 22; font.weight: Font.DemiBold }
+        RowLayout {
+            spacing: 8
+            StudioButton { text: "General"; checked: root.section === "General"; onClicked: root.section = "General" }
+            StudioButton { text: "Advanced"; checked: root.section === "Advanced"; onClicked: root.section = "Advanced" }
         }
-
-        Item {
-            width: 1
-            height: 10
-        }
-
-        Text {
-            text: "Keep common preferences in one place."
-            color: "#60717A"
-            font.pixelSize: 15
-        }
-
-        Item {
-            width: 1
-            height: 30
-        }
-
         Rectangle {
-            width: parent.width
-            height: 238
-            radius: 8
-            color: "#FFFFFF"
-            border.color: "#E1E7E9"
-
-            Column {
-                anchors {
-                    fill: parent
-                    margins: 28
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            radius: 5
+            color: "#162126"
+            border.color: "#2B3C43"
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 12
+                Text { text: root.section; color: "#EAF0F1"; font.pixelSize: 16; font.weight: Font.DemiBold }
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#2F4148" }
+                ColumnLayout {
+                    visible: root.section === "General"
+                    spacing: 8
+                    Text { text: "Smart mode"; color: "#DDE9E9"; font.pixelSize: 13; font.weight: Font.DemiBold }
+                    Text { text: "Hardware recommendations are not configured."; color: "#8FA3A7"; font.pixelSize: 12 }
                 }
-                spacing: 0
-
-                RowLayout {
-                    width: parent.width
-                    height: 58
-
-                    Column {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Text {
-                            text: "Smart mode"
-                            color: "#13202A"
-                            font.pixelSize: 16
-                            font.weight: Font.DemiBold
-                        }
-
-                        Text {
-                            text: "Hardware recommendations are unavailable."
-                            color: "#73828A"
-                            font.pixelSize: 14
-                        }
+                ColumnLayout {
+                    visible: root.section === "Advanced"
+                    spacing: 10
+                    Text { text: "Diagnostics"; color: "#DDE9E9"; font.pixelSize: 13; font.weight: Font.DemiBold }
+                    StudioCheckBox {
+                        objectName: "detailedDiagnosticsToggle"
+                        text: "Enable detailed recording diagnostics"
+                        checked: studioController.detailedRecordingDiagnostics
+                        onToggled: studioController.setDetailedRecordingDiagnostics(checked)
                     }
-
-                    Switch {
-                        checked: false
-                        enabled: false
-                    }
-                }
-
-                Rectangle {
-                    width: parent.width
-                    height: 1
-                    color: "#E8ECEE"
-                }
-
-                RowLayout {
-                    width: parent.width
-                    height: 74
-
-                    Column {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Text {
-                            text: "Recording location"
-                            color: "#13202A"
-                            font.pixelSize: 16
-                            font.weight: Font.DemiBold
-                        }
-
-                        Text {
-                            text: "No location selected."
-                            color: "#73828A"
-                            font.pixelSize: 14
-                        }
-                    }
-
-                    Button {
-                        text: "Choose"
-                        enabled: false
-                    }
-                }
-
-                Rectangle {
-                    width: parent.width
-                    height: 1
-                    color: "#E8ECEE"
-                }
-
-                RowLayout {
-                    width: parent.width
-                    height: 58
-
-                    Column {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Text {
-                            text: "Encoder"
-                            color: "#13202A"
-                            font.pixelSize: 16
-                            font.weight: Font.DemiBold
-                        }
-
-                        Text {
-                            text: "No encoder selected."
-                            color: "#73828A"
-                            font.pixelSize: 14
-                        }
-                    }
-
                     Text {
-                        text: "Automatic"
-                        color: "#60717A"
-                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                        text: "When enabled, recording logs are saved in the application logs folder, not beside your videos. The setting applies to new recordings."
+                        color: "#8FA3A7"; font.pixelSize: 12; wrapMode: Text.WordWrap
                     }
+                    StudioButton { text: "Export Diagnostics"; onClicked: exportDialog.open() }
+                    Text { visible: root.exportMessage.length > 0; text: root.exportMessage; color: "#A7D56C"; font.pixelSize: 12 }
                 }
+                Item { Layout.fillHeight: true }
             }
         }
     }
