@@ -17,6 +17,7 @@
 
 #include <QObject>
 #include <QJsonObject>
+#include <QSet>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QTimer>
@@ -176,6 +177,7 @@ private:
     void updateProgramAudioSink();
     void setPlatformState(const QString &state, const QString &message = {});
     void loadYouTubeChannel();
+    void loadYouTubeBroadcastPage(const QString &pageToken, quint64 generation);
     void prepareYouTubeStream(const QString &broadcastId);
     void startYouTubeIngest(const QString &broadcastId, const QJsonObject &stream);
     void checkYouTubeReady();
@@ -213,6 +215,8 @@ private:
     QString youtubeBroadcastId_;
     QString youtubeStreamId_;
     QVariantList youtubeBroadcasts_;
+    QSet<QString> youtubeBroadcastPageTokens_;
+    quint64 youtubeBroadcastRefreshGeneration_ = 0;
     QVariantList youtubeCategories_;
     bool youtubeChecking_ = false;
     bool youtubeTransitionRequested_ = false;

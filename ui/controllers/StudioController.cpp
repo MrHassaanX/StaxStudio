@@ -754,38 +754,54 @@ void StudioController::refreshYouTubeOptions()
         emit projectChanged();
     });
     youtubeBroadcasts_.clear();
-    const auto appendBroadcasts = [this](const QJsonObject &json, const QString &error) {
-        if (!error.isEmpty()) { setPlatformState(QStringLiteral("Error"), error); return; }
-        for (const QJsonValue &value : json.value(QStringLiteral("items")).toArray()) {
-            const QJsonObject item = value.toObject();
-            const QString id = item.value(QStringLiteral("id")).toString();
+    youtubeBroadcastPageTokens_.clear();
+    const quint64 generation = ++youtubeBroadcastRefreshGeneration_;
+    loadYouTubeBroadcastPage({}, generation);
+}
+
+void StudioController::loadYouTubeBroadcastPage(const QString &pageToken, const quint64 generation)
+{
+    if (!youtube_ || generation != youtubeBroadcastRefreshGeneration_) return;
+    if (!pageToken.isEmpty()) {
+        if (youtubeBroadcastPageTokens_.contains(pageToken)) {
+            setPlatformState(QStringLiteral("Broadcast refresh failed"),
+                             QStringLiteral("YouTube liveBroadcasts.list returned a repeated page token."));
+            return;
+        }
+        youtubeBroadcastPageTokens_.insert(pageToken);
+    }
+    youtube_->get(YouTubeClient::apiUrl(QStringLiteral("liveBroadcasts"),
+                                       YouTubeProvider::broadcastListQuery(pageToken)),
+                  [this, generation](const QJsonObject &json, const QString &error) {
+        if (generation != youtubeBroadcastRefreshGeneration_) return;
+        if (!error.isEmpty()) {
+            setPlatformState(QStringLiteral("Broadcast refresh failed"),
+                             QStringLiteral("YouTube liveBroadcasts.list failed: %1").arg(error));
+            return;
+        }
+        for (const QVariant &candidate : YouTubeProvider::eligibleBroadcasts(json)) {
+            const QString id = candidate.toMap().value(QStringLiteral("id")).toString();
             bool duplicate = false;
-            for (const QVariant &existing : youtubeBroadcasts_)
-                if (existing.toMap().value(QStringLiteral("id")).toString() == id) duplicate = true;
-            if (duplicate || id.isEmpty()) continue;
-            const QJsonObject snippet = item.value(QStringLiteral("snippet")).toObject();
-            const QJsonObject status = item.value(QStringLiteral("status")).toObject();
-            const QJsonObject content = item.value(QStringLiteral("contentDetails")).toObject();
-            youtubeBroadcasts_.append(QVariantMap{{"id", id}, {"title", snippet.value(QStringLiteral("title")).toString()},
-                {"description", snippet.value(QStringLiteral("description")).toString()},
-                {"categoryId", snippet.value(QStringLiteral("categoryId")).toString()},
-                {"scheduledStartTime", snippet.value(QStringLiteral("scheduledStartTime")).toString()},
-                {"privacy", status.value(QStringLiteral("privacyStatus")).toString()},
-                {"madeForKids", status.value(QStringLiteral("selfDeclaredMadeForKids")).toBool()},
-                {"status", status.value(QStringLiteral("lifeCycleStatus")).toString()},
-                {"boundStreamId", content.value(QStringLiteral("boundStreamId")).toString()},
-                {"enableDvr", content.value(QStringLiteral("enableDvr")).toBool()},
-                {"latency", content.value(QStringLiteral("latencyPreference")).toString()},
-                {"autoStart", content.value(QStringLiteral("enableAutoStart")).toBool()},
-                {"autoStop", content.value(QStringLiteral("enableAutoStop")).toBool()}});
+            for (const QVariant &existing : youtubeBroadcasts_) {
+                if (existing.toMap().value(QStringLiteral("id")).toString() == id) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) youtubeBroadcasts_.append(candidate);
         }
         emit projectChanged();
-    };
-    for (const QString &state : {QStringLiteral("upcoming"), QStringLiteral("active")}) {
-        youtube_->get(YouTubeClient::apiUrl(QStringLiteral("liveBroadcasts"),
-                          {{"part", QStringLiteral("snippet,status,contentDetails")},
-                           {"broadcastStatus", state}, {"mine", QStringLiteral("true")}}), appendBroadcasts);
-    }
+        const QString nextPageToken = json.value(QStringLiteral("nextPageToken")).toString();
+        if (!nextPageToken.isEmpty()) {
+            loadYouTubeBroadcastPage(nextPageToken, generation);
+            return;
+        }
+        const StreamDestination *destination = youtubeDestination();
+        if (destination && destination->connected && youtubeBroadcastId_.isEmpty()
+            && !streamer_.isAcceptingInput()) {
+            setPlatformState(QStringLiteral("Ready"), QStringLiteral("YouTube broadcasts refreshed."));
+        }
+    });
 }
 
 void StudioController::goLiveYouTube(const bool recordWhileStreaming)

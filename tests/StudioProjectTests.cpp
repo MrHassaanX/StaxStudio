@@ -66,6 +66,7 @@ private slots:
     void storesCredentialsBehindAbstraction();
     void persistsDestinationsWithoutSecrets();
     void serializesYouTubeBroadcastRequests();
+    void filtersYouTubeBroadcastListsLocally();
     void serializesTwitchAndKickMetadata();
     void validatesOAuthLoopbackState();
     void executesYouTubeLifecycleWithMockTransport();
@@ -448,6 +449,43 @@ void StudioProjectTests::serializesYouTubeBroadcastRequests()
     QVERIFY(bind.startsWith(QStringLiteral("https://www.googleapis.com/youtube/v3/liveBroadcasts/bind")));
     QVERIFY(bind.contains(QStringLiteral("broadcast-1")));
     QVERIFY(bind.contains(QStringLiteral("stream-2")));
+}
+
+void StudioProjectTests::filtersYouTubeBroadcastListsLocally()
+{
+    const QMap<QString, QString> query = YouTubeProvider::broadcastListQuery(QStringLiteral("page-2"));
+    QCOMPARE(query.value(QStringLiteral("mine")), QStringLiteral("true"));
+    QCOMPARE(query.value(QStringLiteral("pageToken")), QStringLiteral("page-2"));
+    QCOMPARE(query.value(QStringLiteral("maxResults")), QStringLiteral("50"));
+    QVERIFY(!query.contains(QStringLiteral("broadcastStatus")));
+    QVERIFY(!query.contains(QStringLiteral("id")));
+    int primaryFilters = 0;
+    for (const QString &filter : {QStringLiteral("mine"), QStringLiteral("broadcastStatus"), QStringLiteral("id")})
+        primaryFilters += query.contains(filter) ? 1 : 0;
+    QCOMPARE(primaryFilters, 1);
+
+    const auto broadcast = [](const QString &id, const QString &state, const QString &title) {
+        return QJsonObject{{"id", id},
+                           {"snippet", QJsonObject{{"title", title}, {"description", QStringLiteral("Description")},
+                                                    {"categoryId", QStringLiteral("20")},
+                                                    {"scheduledStartTime", QStringLiteral("2026-11-01T12:00:00Z")}}},
+                           {"status", QJsonObject{{"lifeCycleStatus", state}, {"privacyStatus", QStringLiteral("private")},
+                                                   {"selfDeclaredMadeForKids", false}}},
+                           {"contentDetails", QJsonObject{{"boundStreamId", QStringLiteral("stream-1")},
+                                                           {"enableDvr", true}, {"latencyPreference", QStringLiteral("low")},
+                                                           {"enableAutoStart", true}, {"enableAutoStop", true}}}};
+    };
+    const QJsonObject response{{"items", QJsonArray{
+        broadcast(QStringLiteral("upcoming-1"), QStringLiteral("ready"), QStringLiteral("Upcoming")),
+        broadcast(QStringLiteral("live-1"), QStringLiteral("live"), QStringLiteral("Current")),
+        broadcast(QStringLiteral("complete-1"), QStringLiteral("complete"), QStringLiteral("Finished")),
+        broadcast(QStringLiteral("upcoming-1"), QStringLiteral("ready"), QStringLiteral("Duplicate"))}}};
+    const QVariantList eligible = YouTubeProvider::eligibleBroadcasts(response);
+    QCOMPARE(eligible.size(), 2);
+    QCOMPARE(eligible.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("upcoming-1"));
+    QCOMPARE(eligible.at(0).toMap().value(QStringLiteral("boundStreamId")).toString(), QStringLiteral("stream-1"));
+    QCOMPARE(eligible.at(0).toMap().value(QStringLiteral("privacy")).toString(), QStringLiteral("private"));
+    QCOMPARE(eligible.at(1).toMap().value(QStringLiteral("status")).toString(), QStringLiteral("live"));
 }
 
 void StudioProjectTests::serializesTwitchAndKickMetadata()
