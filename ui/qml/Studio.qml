@@ -554,6 +554,7 @@ Item {
         anchors.centerIn: parent
         onOpened: {
             sourcePropertiesName.forceActiveFocus()
+            audioScope.currentIndex = root.propertyConfiguration.audioScope === "global" ? 1 : 0
             sourceTarget.currentIndex = root.propertyTargets.map(function(item) { return item.id }).indexOf(root.propertyConfiguration.targetId || "")
             if (sourceTarget.currentIndex < 0 && root.propertyTargets.length > 0) sourceTarget.currentIndex = 0
             sourceFormat.currentIndex = root.propertyFormats.map(function(item) { return item.id }).indexOf(root.propertyConfiguration.formatId || "")
@@ -561,6 +562,8 @@ Item {
         }
         onAccepted: {
             studioController.renameSource(root.propertiesSourceId, sourcePropertiesName.text)
+            if (audioScope.visible)
+                studioController.setAudioSourceScope(root.propertiesSourceId, audioScope.currentIndex === 1)
             if (root.propertyTargets.length > 0) {
                 const target = root.propertyTargets[sourceTarget.currentIndex]
                 const format = root.propertyFormats.length > 0 ? root.propertyFormats[sourceFormat.currentIndex] : null
@@ -573,6 +576,13 @@ Item {
             Text { text: root.propertiesSourceType; color: "#829399"; font.pixelSize: 11 }
             Text { text: "Source name"; color: "#B6C6C9"; font.pixelSize: 12 }
             StudioTextField { id: sourcePropertiesName; Layout.fillWidth: true; selectByMouse: true }
+            Text { visible: audioScope.visible; text: "Audio scope"; color: "#B6C6C9"; font.pixelSize: 12 }
+            StudioComboBox {
+                id: audioScope
+                visible: root.propertiesSourceType === "Microphone" || root.propertiesSourceType === "Desktop Audio"
+                Layout.fillWidth: true
+                model: ["This scene", "All scenes"]
+            }
             Text { visible: root.propertyTargets.length > 0; text: root.propertiesSourceType === "Webcam" || root.propertiesSourceType === "Microphone" ? "Device" : (root.propertiesSourceType === "Desktop Audio" ? "Output device" : (root.propertiesSourceType === "Display Capture" ? "Display" : "Window")); color: "#B6C6C9"; font.pixelSize: 12 }
             StudioComboBox {
                 id: sourceTarget

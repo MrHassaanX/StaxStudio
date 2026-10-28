@@ -56,6 +56,7 @@ private slots:
     void keepsModelsConsistentThroughRepeatedLifecycleChanges();
     void normalizesAudioBlocks();
     void programMixerAlignsAndBoundsSources();
+    void routesGlobalAndSceneAudioWithoutResettingTimeline();
     void streamsThroughMockLifecycle();
     void streamFailureAndRedactionStayIsolated();
     void boundsStreamingQueues();
@@ -127,6 +128,63 @@ void StudioProjectTests::programMixerAlignsAndBoundsSources()
     for(int i=0;i<480;++i) {surround.samples[i*3]=0.2f;surround.samples[i*3+1]=0.3f;surround.samples[i*3+2]=0.9f;}
     mixer.push("existing-front-channel-mapping",std::move(surround));
     mixer.produceUntil(10'000'000,[&](auto block){QCOMPARE(block.audio.samples[0],0.2f);QCOMPARE(block.audio.samples[1],0.3f);});
+}
+
+void StudioProjectTests::routesGlobalAndSceneAudioWithoutResettingTimeline()
+{
+    StudioProject project = StudioProject::createDefault();
+    const QString firstScene = project.activeSceneId;
+    const QString secondScene = project.addScene(QStringLiteral("BRB")).id;
+    project.activeSceneId = firstScene;
+    const QString mic = project.addSource(SourceType::Microphone).id;
+    const QString desktop = project.addSource(SourceType::DesktopAudio).id;
+    project.source(mic)->configuration.insert(QStringLiteral("audioScope"), QStringLiteral("global"));
+    project.source(desktop)->configuration.insert(QStringLiteral("audioScope"), QStringLiteral("global"));
+    const QString sceneMic = project.addSource(SourceType::Microphone).id;
+    QVERIFY(project.setMixerVolume(mic, 0.4));
+    QVERIFY(project.setMixerMuted(desktop, true));
+    ProgramAudioMixer mixer;
+    mixer.reset(0);
+    qint64 previousTimestamp = -1;
+    for (int step = 0; step < 8; ++step) {
+        project.activeSceneId = step % 2 ? secondScene : firstScene;
+        const QSet<QString> active = project.activeProgramAudioSourceIds();
+        QVERIFY(active.contains(mic));
+        QVERIFY(active.contains(desktop));
+        QCOMPARE(active.contains(sceneMic), step % 2 == 0);
+        const qint64 timestamp = qint64(step) * 10'000'000;
+        mixer.push(mic, {timestamp, 48000, 1, QVector<float>(480, 0.2f)});
+        if (active.contains(sceneMic))
+            mixer.push(sceneMic, {timestamp, 48000, 1, QVector<float>(480, 0.1f)});
+        QVector<ProgramMixedAudioBlock> output;
+        mixer.produceUntil(timestamp + 10'000'000, [&](auto block) { output.append(std::move(block)); });
+        QCOMPARE(output.size(), 1);
+        QVERIFY(output.first().audio.timestampNs > previousTimestamp);
+        previousTimestamp = output.first().audio.timestampNs;
+        const float expected = step % 2 ? 0.2f : 0.3f;
+        QVERIFY(std::abs(output.first().audio.samples.first() - expected) < 1e-5f);
+    }
+    project.normalize();
+    QCOMPARE(project.mixerChannels.size(), 3);
+    for (const auto &channel : project.mixerChannels) {
+        if (channel.id == mic) QCOMPARE(channel.volume, 0.4);
+        if (channel.id == desktop) QVERIFY(channel.muted);
+    }
+    QVERIFY(project.removeScene(firstScene));
+    QVERIFY(project.activeProgramAudioSourceIds().contains(mic));
+    QVERIFY(project.activeProgramAudioSourceIds().contains(desktop));
+    int preservedGlobalRows = 0;
+    for (const Scene &scene : project.scenes)
+        for (const SceneItem &item : scene.items)
+            if (item.sourceId == mic || item.sourceId == desktop) ++preservedGlobalRows;
+    QCOMPARE(preservedGlobalRows, 2);
+    QTemporaryDir saved;
+    QVERIFY(saved.isValid());
+    StudioRepository repository(saved.path());
+    QVERIFY(repository.save(project));
+    const StudioProject restored = repository.load();
+    QCOMPARE(restored.source(mic)->configuration.value(QStringLiteral("audioScope")).toString(), QStringLiteral("global"));
+    QCOMPARE(restored.activeProgramAudioSourceIds(), project.activeProgramAudioSourceIds());
 }
 
 void StudioProjectTests::streamsThroughMockLifecycle()

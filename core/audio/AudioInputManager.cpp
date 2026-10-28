@@ -98,6 +98,12 @@ void AudioInputManager::setMixControls(const QString &id, const double gain, con
     const auto it = entries_.find(id);
     if (it != entries_.end()) it->source->setMixControls(gain, muted);
 }
+void AudioInputManager::setActiveProgramSources(const QSet<QString> &sourceIds)
+{
+    QMutexLocker processing(&processingMutex_);
+    for (const QString &id : activeProgramSources_ - sourceIds) programMixer_.removeSource(id);
+    activeProgramSources_ = sourceIds;
+}
 void AudioInputManager::setRecordingSink(std::function<void(ProgramMixedAudioBlock)> sink)
 {
     { QMutexLocker lock(&processingMutex_);
@@ -132,7 +138,9 @@ void AudioInputManager::drainToSink(bool flush)
     QMutexLocker processing(&processingMutex_);
     auto pending=takePendingBlocks();
     if(!recordingSink_) return;
-    for(auto it=pending.begin();it!=pending.end();++it)
+    for(auto it=pending.begin();it!=pending.end();++it) {
+        if (!activeProgramSources_.contains(it.key())) continue;
         for(auto &block:it.value()) programMixer_.push(it.key(),std::move(block));
+    }
     programMixer_.produceUntil(mediaTimestampNs()-(flush?0:ProgramAudioMixer::LatencyNs),recordingSink_);
 }

@@ -3,6 +3,7 @@
 #include "core/source/Source.h"
 #include "ProgramAudioMixer.h"
 #include <QHash>
+#include <QSet>
 #include <QMutex>
 #include <QObject>
 #include <QTimer>
@@ -19,6 +20,7 @@ public:
     explicit AudioInputManager(QObject *parent = nullptr);
     ~AudioInputManager() override;
     void synchronizeSources(const QVector<Source> &sources);
+    void setActiveProgramSources(const QSet<QString> &sourceIds);
     QVariantList targets(SourceType type) const;
     AudioRuntime runtime(const QString &sourceId) const;
     float levelDb(const QString &sourceId) const;
@@ -39,6 +41,7 @@ private:
     void drainToSink(bool flush = false);
     mutable QMutex processingMutex_;
     ProgramAudioMixer programMixer_;
+    QSet<QString> activeProgramSources_;
     mutable QMutex entriesMutex_;
     QHash<QString, Entry> entries_;
     QTimer meterTimer_;

@@ -116,6 +116,25 @@ Source *StudioProject::source(const QString &sourceId)
 
 const Source *StudioProject::source(const QString &sourceId) const { return const_cast<StudioProject *>(this)->source(sourceId); }
 
+QSet<QString> StudioProject::activeProgramAudioSourceIds() const
+{
+    QSet<QString> ids;
+    const Scene *scene = activeScene();
+    for (const Source &source : sources) {
+        if (!source.enabled || (source.type != SourceType::Microphone && source.type != SourceType::DesktopAudio))
+            continue;
+        if (source.configuration.value(QStringLiteral("audioScope")).toString() == QStringLiteral("global")) {
+            ids.insert(source.id);
+            continue;
+        }
+        if (!scene) continue;
+        for (const SceneItem &item : scene->items) {
+            if (item.sourceId == source.id && item.visible) { ids.insert(source.id); break; }
+        }
+    }
+    return ids;
+}
+
 Scene &StudioProject::addScene(const QString &requestedName)
 {
     scenes.append({newId(), uniqueSceneName(requestedName), {}});
@@ -128,7 +147,19 @@ bool StudioProject::removeScene(const QString &sceneId)
     const QString removedId = sceneId;
     const int index = sceneIndex(sceneId);
     if (index < 0 || scenes.size() <= 1) return false;
+    const QVector<SceneItem> removedItems = scenes[index].items;
     scenes.removeAt(index);
+    // A global device must retain an editable owner row when its original
+    // scene is deleted. Move only items that have no surviving scene reference.
+    for (const SceneItem &item : removedItems) {
+        const Source *audioSource = source(item.sourceId);
+        if (!audioSource || audioSource->configuration.value(QStringLiteral("audioScope")).toString() != QStringLiteral("global"))
+            continue;
+        bool referenced = false;
+        for (const Scene &scene : scenes) for (const SceneItem &other : scene.items)
+            if (other.sourceId == item.sourceId) referenced = true;
+        if (!referenced) scenes.first().items.append(item);
+    }
     if (activeSceneId == removedId) activeSceneId = scenes[qMin(index, scenes.size() - 1)].id;
     normalize();
     return true;
@@ -335,7 +366,10 @@ void StudioProject::normalize()
     for (auto &scene : scenes) for (qsizetype i = 0; i < scene.items.size(); ++i) scene.items[i].zOrder = static_cast<int>(i);
     QSet<QString> referencedSources;
     for (const auto &scene : scenes) for (const auto &item : scene.items) referencedSources.insert(item.sourceId);
-    sources.removeIf([&](const Source &source) { return !referencedSources.contains(source.id); });
+    sources.removeIf([&](const Source &source) {
+        return !referencedSources.contains(source.id)
+            && source.configuration.value(QStringLiteral("audioScope")).toString() != QStringLiteral("global");
+    });
     // Mixer IDs are source IDs: legacy standalone demo channels have no owner.
     QVector<MixerChannel> channels;
     for (const Source &source : sources) {

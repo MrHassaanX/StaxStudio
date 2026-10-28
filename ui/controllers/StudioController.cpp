@@ -113,6 +113,7 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
     programEngine_.setAudioDiagnosticsProvider([this] { return audioSources_.diagnostics(); });
     programEngine_.setScene(compositorLayers(), project_.programResolution.size());
     audioSources_.synchronizeSources(project_.sources);
+    audioSources_.setActiveProgramSources(project_.activeProgramAudioSourceIds());
     for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
     connect(&recorder_, &LocalRecorder::stateChanged, this, [this] {
         const QString state = recorder_.stateName();
@@ -292,6 +293,13 @@ QVariantMap StudioController::sourceConfiguration(const QString &sourceId) const
 {
     const Source *source = project_.source(sourceId);
     return source ? source->configuration.toVariantMap() : QVariantMap{};
+}
+void StudioController::setAudioSourceScope(const QString &sourceId, bool global)
+{
+    Source *source = project_.source(sourceId);
+    if (!source || (source->type != SourceType::Microphone && source->type != SourceType::DesktopAudio)) return;
+    source->configuration.insert(QStringLiteral("audioScope"), global ? QStringLiteral("global") : QStringLiteral("scene"));
+    refresh();
 }
 void StudioController::configureCaptureSource(const QString &sourceId, const QString &targetId, const QString &formatId, const bool captureCursor)
 {
@@ -1395,6 +1403,7 @@ void StudioController::refresh()
 {
     visualSources_.synchronizeSources(project_.sources);
     audioSources_.synchronizeSources(project_.sources);
+    audioSources_.setActiveProgramSources(project_.activeProgramAudioSourceIds());
     for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
     mixerModel_.synchronize();
     programEngine_.setScene(compositorLayers(), project_.programResolution.size());

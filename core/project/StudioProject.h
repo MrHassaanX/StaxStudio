@@ -9,6 +9,7 @@
 #include "core/transition/TransitionSettings.h"
 
 #include <QString>
+#include <QSet>
 #include <QVector>
 
 class StudioProject final
@@ -38,6 +39,7 @@ public:
     [[nodiscard]] int sourceIndex(const QString &sourceId) const;
     [[nodiscard]] Source *source(const QString &sourceId);
     [[nodiscard]] const Source *source(const QString &sourceId) const;
+    [[nodiscard]] QSet<QString> activeProgramAudioSourceIds() const;
 
     Scene &addScene(const QString &requestedName);
     bool removeScene(const QString &sceneId);

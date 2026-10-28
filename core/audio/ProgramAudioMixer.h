@@ -13,6 +13,7 @@ public:
     static constexpr int Rate = 48000, Quantum = 480;
     static constexpr qint64 LatencyNs = 40'000'000;
     void reset(qint64 originNs) { sources_.clear(); origin_ = originNs; cursor_ = 0; received_ = produced_ = late_ = rejected_ = 0; }
+    void removeSource(const QString &id) { sources_.remove(id); }
     void push(const QString &id, AudioBlock block) {
         ++received_;
         if (!block.isValid() || block.sampleRate != Rate || block.frameCount()>2*Rate) { ++rejected_; return; }

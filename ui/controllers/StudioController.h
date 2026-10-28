@@ -109,6 +109,7 @@ public:
     Q_INVOKABLE QVariantList captureTargets(const QString &typeName) const;
     Q_INVOKABLE QVariantList cameraFormats(const QString &targetId) const;
     Q_INVOKABLE QVariantMap sourceConfiguration(const QString &sourceId) const;
+    Q_INVOKABLE void setAudioSourceScope(const QString &sourceId, bool global);
     Q_INVOKABLE void configureCaptureSource(const QString &sourceId, const QString &targetId, const QString &formatId = QString{}, bool captureCursor = true);
     Q_INVOKABLE QString sourceRuntimeState(const QString &sourceId) const;
     Q_INVOKABLE QString sourceRuntimeMessage(const QString &sourceId) const;

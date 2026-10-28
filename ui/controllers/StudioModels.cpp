@@ -246,13 +246,9 @@ bool MixerListModel::setMuted(const QString &id, bool muted)
 void MixerListModel::synchronize()
 {
     QVector<MixerChannel> wanted;
-    if (const Scene *scene = project_->activeScene()) {
-        for (const auto &channel : project_->mixerChannels) {
-            for (const auto &item : scene->items) {
-                if (item.sourceId == channel.id) { wanted.append(channel); break; }
-            }
-        }
-    }
+    const QSet<QString> active = project_->activeProgramAudioSourceIds();
+    for (const auto &channel : project_->mixerChannels)
+        if (active.contains(channel.id)) wanted.append(channel);
     for (int row = static_cast<int>(channels_.size()) - 1; row >= 0; --row) {
         const auto found = std::find_if(wanted.begin(), wanted.end(), [&](const auto &channel) { return channel.id == channels_[row].id; });
         if (found != wanted.end()) continue;
