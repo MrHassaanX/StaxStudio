@@ -135,12 +135,30 @@ void WasapiAudioSource::run()
     UINT64 sourceOriginFrame = 0, nextDeviceFrame = 0;
     while (running_) {
         if (WaitForSingleObject(eventHandle, 250) != WAIT_OBJECT_0) continue;
-        UINT32 packets = 0; if (FAILED(capture->GetNextPacketSize(&packets))) break;
+        UINT32 packets = 0;
+        HRESULT packetResult = capture->GetNextPacketSize(&packets);
+        if (FAILED(packetResult)) {
+            QMutexLocker lock(&mutex_);
+            runtime_ = {packetResult == AUDCLNT_E_DEVICE_INVALIDATED ? CaptureState::Unavailable : CaptureState::Error,
+                        QStringLiteral("WASAPI capture stopped while reading packet size"), -90};
+            running_ = false;
+            break;
+        }
         while (packets) {
             BYTE *data = nullptr; UINT32 frames = 0; DWORD flags = 0;
             UINT64 deviceFrame = 0, packetQpc = 0;
-            if (FAILED(capture->GetBuffer(&data, &frames, &flags, &deviceFrame, &packetQpc))) break;
-            if (!frames) break;
+            const HRESULT bufferResult = capture->GetBuffer(&data, &frames, &flags, &deviceFrame, &packetQpc);
+            if (FAILED(bufferResult)) {
+                QMutexLocker lock(&mutex_);
+                runtime_ = {bufferResult == AUDCLNT_E_DEVICE_INVALIDATED ? CaptureState::Unavailable : CaptureState::Error,
+                            QStringLiteral("WASAPI capture stopped while reading an audio buffer"), -90};
+                running_ = false;
+                break;
+            }
+            if (!frames) {
+                capture->ReleaseBuffer(0);
+                break;
+            }
             const bool timestampValid = !(flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR);
             if (!timestampValid && sourceAnchored) deviceFrame = nextDeviceFrame;
             if (!sourceAnchored || deviceFrame != nextDeviceFrame) {
@@ -228,7 +246,14 @@ void WasapiAudioSource::run()
                 runtime_.state = CaptureState::Active;
             }
             if (blockReady_) blockReady_();
-            if (FAILED(capture->GetNextPacketSize(&packets))) { packets = 0; }
+            packetResult = capture->GetNextPacketSize(&packets);
+            if (FAILED(packetResult)) {
+                QMutexLocker lock(&mutex_);
+                runtime_ = {packetResult == AUDCLNT_E_DEVICE_INVALIDATED ? CaptureState::Unavailable : CaptureState::Error,
+                            QStringLiteral("WASAPI capture stopped while reading packet size"), -90};
+                running_ = false;
+                break;
+            }
         }
     }
     client->Stop();
