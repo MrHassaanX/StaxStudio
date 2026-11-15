@@ -57,15 +57,6 @@ jobs:
           cmake --build ../StaxStudio-build --target StaxStudioTests --parallel
           cmake --build ../StaxStudio-build --target StaxStudioUiTests --parallel
 
-      - name: Trace UI test progress
-        run: |
-          export QT_QPA_PLATFORM=offscreen
-          export QT_QUICK_BACKEND=software
-          export QT_PLUGIN_PATH="$(cygpath -m "$MINGW_PREFIX/bin/../plugins")"
-          export QT_QPA_FONTDIR="$(cygpath -m "$WINDIR/Fonts")"
-          cd ../StaxStudio-build
-          timeout 180s ./StaxStudioUiTests.exe -v1
-
       - name: Run tests
         run: ctest --test-dir ../StaxStudio-build --output-on-failure
 
