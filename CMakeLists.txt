@@ -365,7 +365,7 @@ qt_add_shaders(StaxStudioUiTests "StaxUiTestCompositorShaders"
 target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated ${STAX_FFMPEG_INCLUDE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Network Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} d3d11 dxgi dxguid advapi32 ole32 uuid propsys)
-add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
+add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -v1 -o -,txt)
 target_link_libraries(StaxStudioUiTests PRIVATE d3dcompiler)
 foreach(target StaxStudio StaxStudioTests StaxStudioUiTests)
     target_sources(${target} PRIVATE ui/controllers/DockLayout.cpp ui/controllers/DockLayout.h)
