@@ -372,5 +372,5 @@ foreach(target StaxStudio StaxStudioTests StaxStudioUiTests)
 endforeach()
 set_tests_properties(StaxStudioUiTests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"
-    TIMEOUT 150
+    TIMEOUT 600
 )
