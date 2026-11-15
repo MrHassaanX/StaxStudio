@@ -18,6 +18,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <QElapsedTimer>
+#include <cstdio>
 #include <memory>
 #ifdef Q_OS_WIN
 #include <d3d11.h>
@@ -50,6 +51,7 @@ class StudioUiTests final : public QObject
 {
     Q_OBJECT
 private slots:
+    void init();
     void visibleRowsAndRepeatedLifecycle();
     void captureConfigurationUsesMonotonicTimestamps();
     void offscreenRecordingNeedsNoPreviewWindow();
@@ -63,6 +65,12 @@ private slots:
     void diagnosticsPreferencePersists();
     void settingsExposesDiagnosticsControl();
 };
+
+void StudioUiTests::init()
+{
+    std::fprintf(stderr, "[UI TEST] %s\\n", QTest::currentTestFunction());
+    std::fflush(stderr);
+}
 
 void StudioUiTests::streamPageLoadsWithoutWarnings()
 {
