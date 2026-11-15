@@ -1,6 +1,7 @@
 #include "core/project/StudioProject.h"
 #include "core/audio/AudioProcessing.h"
 #include "core/audio/ProgramAudioMixer.h"
+#include "core/audio/AudioRouteSelector.h"
 #include "core/audio/wasapi/WasapiAudioSource.h"
 #include "core/platform/CredentialStore.h"
 #include "core/platform/OAuthPkce.h"
@@ -57,6 +58,7 @@ private slots:
     void normalizesAudioBlocks();
     void programMixerAlignsAndBoundsSources();
     void routesGlobalAndSceneAudioWithoutResettingTimeline();
+    void sharesPhysicalAudioRoutesAcrossScenes();
     void streamsThroughMockLifecycle();
     void streamFailureAndRedactionStayIsolated();
     void boundsStreamingQueues();
@@ -185,6 +187,50 @@ void StudioProjectTests::routesGlobalAndSceneAudioWithoutResettingTimeline()
     const StudioProject restored = repository.load();
     QCOMPARE(restored.source(mic)->configuration.value(QStringLiteral("audioScope")).toString(), QStringLiteral("global"));
     QCOMPARE(restored.activeProgramAudioSourceIds(), project.activeProgramAudioSourceIds());
+}
+
+void StudioProjectTests::sharesPhysicalAudioRoutesAcrossScenes()
+{
+    const QVector<AudioRoute> routes = {
+        {QStringLiteral("scene-mic"), QStringLiteral("input:device-a"), false},
+        {QStringLiteral("global-mic"), QStringLiteral("input:device-a"), true},
+        {QStringLiteral("desktop"), QStringLiteral("output:device-a"), true},
+        {QStringLiteral("other-mic"), QStringLiteral("input:device-b"), false}
+    };
+    const auto first = selectAudioRouteOwners(routes, {
+        QStringLiteral("scene-mic"), QStringLiteral("global-mic"),
+        QStringLiteral("desktop"), QStringLiteral("other-mic")});
+    QCOMPARE(first.size(), 3);
+    QCOMPARE(first.value(QStringLiteral("input:device-a")), QStringLiteral("global-mic"));
+    QCOMPARE(first.value(QStringLiteral("output:device-a")), QStringLiteral("desktop"));
+    QCOMPARE(first.value(QStringLiteral("input:device-b")), QStringLiteral("other-mic"));
+
+    const auto next = selectAudioRouteOwners(routes, {
+        QStringLiteral("global-mic"), QStringLiteral("desktop")});
+    QCOMPARE(next.size(), 2);
+    QCOMPARE(next.value(QStringLiteral("input:device-a")), QStringLiteral("global-mic"));
+
+    const auto fallback = selectAudioRouteOwners(routes, {QStringLiteral("scene-mic")});
+    QCOMPARE(fallback.size(), 1);
+    QCOMPARE(fallback.value(QStringLiteral("input:device-a")), QStringLiteral("scene-mic"));
+
+    ProgramAudioMixer mixer;
+    mixer.reset(0);
+    for (int step = 0; step < 4; ++step) {
+        const QSet<QString> active = step % 2
+            ? QSet<QString>{QStringLiteral("global-mic")}
+            : QSet<QString>{QStringLiteral("global-mic"), QStringLiteral("scene-mic")};
+        const auto selected = selectAudioRouteOwners(routes, active);
+        QCOMPARE(selected.size(), 1);
+        mixer.push(selected.value(QStringLiteral("input:device-a")),
+                   {qint64(step) * 10'000'000, 48000, 1, QVector<float>(480, 0.2f)});
+        QVector<ProgramMixedAudioBlock> output;
+        mixer.produceUntil(qint64(step + 1) * 10'000'000,
+                           [&](ProgramMixedAudioBlock block) { output.append(std::move(block)); });
+        QCOMPARE(output.size(), 1);
+        QCOMPARE(output.first().audio.timestampNs, qint64(step) * 10'000'000);
+        QCOMPARE(output.first().audio.samples.first(), 0.2f);
+    }
 }
 
 void StudioProjectTests::streamsThroughMockLifecycle()
@@ -1167,7 +1213,6 @@ void StudioProjectTests::optionalWasapiEndpointProbe()
     if (!qEnvironmentVariableIsSet("STAX_WASAPI_PROBE_ENDPOINT")) QSKIP("Opt-in hardware diagnostic only");
     const QString requested = qEnvironmentVariable("STAX_WASAPI_PROBE_ENDPOINT");
     WasapiAudioSource source(requested, false);
-    source.setMixControls(1.0, false);
     source.start();
     for (int second = 0; second < 5; ++second) {
         QTest::qWait(1100);

@@ -3,6 +3,7 @@
 #include "core/project/StudioProject.h"
 
 #include <QAbstractListModel>
+#include <QSet>
 
 class SceneListModel final : public QAbstractListModel
 {
@@ -61,12 +62,15 @@ public:
     QHash<int, QByteArray> roleNames() const override;
     bool setVolume(const QString &id, double volume);
     bool setMuted(const QString &id, bool muted);
+    void setProgramSourceIds(const QSet<QString> &sourceIds);
     void synchronize();
     void setLevel(const QString &id, float levelDb);
     void setRuntime(const QString &id, const QString &state, int channelCount, float levelDb);
 private:
     StudioProject *project_;
     QVector<MixerChannel> channels_;
+    QSet<QString> programSourceIds_;
+    bool hasProgramSourceIds_ = false;
     QHash<QString, float> levels_;
     QHash<QString, QString> states_;
     QHash<QString, int> channelCounts_;

@@ -115,6 +115,7 @@ StudioController::StudioController(const QString &storageDirectory, QObject *par
     audioSources_.synchronizeSources(project_.sources);
     audioSources_.setActiveProgramSources(project_.activeProgramAudioSourceIds());
     for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
+    mixerModel_.setProgramSourceIds(audioSources_.programSourceIds());
     connect(&recorder_, &LocalRecorder::stateChanged, this, [this] {
         const QString state = recorder_.stateName();
         statusMessage_ = recorder_.state() == RecordingState::Error
@@ -1405,7 +1406,7 @@ void StudioController::refresh()
     audioSources_.synchronizeSources(project_.sources);
     audioSources_.setActiveProgramSources(project_.activeProgramAudioSourceIds());
     for (const MixerChannel &channel : project_.mixerChannels) audioSources_.setMixControls(channel.id, channel.volume, channel.muted);
-    mixerModel_.synchronize();
+    mixerModel_.setProgramSourceIds(audioSources_.programSourceIds());
     programEngine_.setScene(compositorLayers(), project_.programResolution.size());
     save();
     emit projectChanged();

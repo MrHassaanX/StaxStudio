@@ -2,6 +2,7 @@
 #include "core/audio/wasapi/WasapiAudioSource.h"
 #include "core/source/Source.h"
 #include "ProgramAudioMixer.h"
+#include "AudioRouteSelector.h"
 #include <QHash>
 #include <QSet>
 #include <QMutex>
@@ -21,6 +22,7 @@ public:
     ~AudioInputManager() override;
     void synchronizeSources(const QVector<Source> &sources);
     void setActiveProgramSources(const QSet<QString> &sourceIds);
+    QSet<QString> programSourceIds() const;
     QVariantList targets(SourceType type) const;
     AudioRuntime runtime(const QString &sourceId) const;
     float levelDb(const QString &sourceId) const;
@@ -34,7 +36,13 @@ public:
 signals:
     void metersChanged();
 private:
-    struct Entry { QString endpointId; std::shared_ptr<WasapiAudioSource> source; };
+    struct Entry {
+        QString endpointKey;
+        std::shared_ptr<WasapiAudioSource> source;
+        bool global = false;
+        float gain = 1.0f;
+        bool muted = false;
+    };
     QVector<Entry> entriesSnapshot() const;
     void wakeMixer();
     void mixerLoop();

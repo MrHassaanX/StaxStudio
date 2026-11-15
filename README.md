@@ -3,8 +3,8 @@
 StaxStudio is a lightweight, Windows-first, open-source screen recording and
 live-streaming application.
 
-Our goal is simple: OBS-level performance, Streamlabs-level simplicity, and a
-modern interface that makes professional recording and streaming approachable.
+Our goal is reliable recording and streaming, simple controls, and a modern
+interface that makes professional production approachable.
 
 ## Current status
 

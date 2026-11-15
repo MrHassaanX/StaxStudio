@@ -53,7 +53,7 @@ QVariantMap WasapiAudioSource::diagnostics() const
     QVariantMap values = {{"capturedBlocks", capturedBlocks_}, {"pendingBlocks", static_cast<qulonglong>(pendingBlocks_.size())},
             {"droppedPendingBlocks", droppedPendingBlocks_}, {"firstTimestampNs", firstTimestampNs_},
             {"lastTimestampNs", lastTimestampNs_}, {"format", captureFormat_},
-            {"peakAfterConversionDb", convertedPeakDb_}, {"peakAfterSourceGainDb", gainedPeakDb_},
+            {"peakAfterConversionDb", convertedPeakDb_},
             {"endpointId", openedEndpointId_}, {"requestedEndpointId", endpointId_},
             {"usesDefaultEndpoint", endpointId_.isEmpty()}, {"endpointFriendlyName", endpointName_}, {"dataFlow", dataFlow_},
             {"loopbackEnabled", loopbackActive_}, {"endpointVolumeScalar", endpointVolume_}, {"endpointMuted", endpointMuted_},
@@ -61,8 +61,6 @@ QVariantMap WasapiAudioSource::diagnostics() const
     for (auto it = nativeDiagnostics_.cbegin(); it != nativeDiagnostics_.cend(); ++it) values.insert(it.key(), it.value());
     return values;
 }
-void WasapiAudioSource::setMixControls(const double gain, const bool muted) { gain_ = qBound(0.0, gain, 1.0); muted_ = muted; }
-
 void WasapiAudioSource::run()
 {
 #ifdef Q_OS_WIN
@@ -121,7 +119,7 @@ void WasapiAudioSource::run()
         {"blockAlign", format->nBlockAlign}, {"sharedModeFlags", quint32(flags)}, {"bufferFrames", bufferFrames},
         {"endpointMeterHresult", quint32(meterResult)}}; }
     qint64 summaryStart = mediaTimestampNs(), nextMeter = 0;
-    float rawMaximum = 0, meterMaximum = -1, convertedMaximum = -90, gainedMaximum = -90;
+    float rawMaximum = 0, meterMaximum = -1, convertedMaximum = -90;
     quint64 packetFlags = 0;
     // GetBuffer's QPC position describes the FIRST sample, not callback arrival.
     // Anchor to the process clock once, then advance on the device sample clock.
@@ -193,9 +191,7 @@ void WasapiAudioSource::run()
             capture->ReleaseBuffer(frames);
             if (!block.isValid()) continue;
             const float convertedPeak = AudioProcessing::peakDb(block);
-            AudioProcessing::applyGainAndMute(block, gain_.load(), muted_);
             convertedMaximum = qMax(convertedMaximum, convertedPeak);
-            gainedMaximum = qMax(gainedMaximum, AudioProcessing::peakDb(block));
             const qint64 now = mediaTimestampNs();
             if (endpointMeter && now >= nextMeter) {
                 float peak = 0;
@@ -223,18 +219,16 @@ void WasapiAudioSource::run()
                 nativeDiagnostics_.insert("WindowsEndpointPeakDbfs", meterMaximum >= 0 ? QVariant(decibels(meterMaximum)) : QVariant{});
                 nativeDiagnostics_.insert("CapturedSamplePeakDbfs", isFloat && format->wBitsPerSample == 32 ? QVariant(decibels(rawMaximum)) : QVariant{});
                 nativeDiagnostics_.insert("convertedWindowPeakDbfs", convertedMaximum);
-                nativeDiagnostics_.insert("postGainWindowPeakDbfs", gainedMaximum);
                 nativeDiagnostics_.insert("measurementStartNs", summaryStart);
                 nativeDiagnostics_.insert("measurementEndNs", now);
                 nativeDiagnostics_.insert("lastPacketFrames", frames);
                 nativeDiagnostics_.insert("packetFlags", packetFlags);
-                summaryStart = now; rawMaximum = 0; meterMaximum = -1; convertedMaximum = gainedMaximum = -90; packetFlags = 0;
+                summaryStart = now; rawMaximum = 0; meterMaximum = -1; convertedMaximum = -90; packetFlags = 0;
             }
             {
                 QMutexLocker lock(&mutex_);
                 runtime_.peakDb = AudioProcessing::peakDb(block);
                 convertedPeakDb_ = convertedPeak;
-                gainedPeakDb_ = runtime_.peakDb;
                 block_ = block;
                 // The recorder drains this bounded queue; a UI meter may still
                 // read block_ without ever owning the capture stream.
