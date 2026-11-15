@@ -294,10 +294,6 @@ if(WIN32)
         COMMENT "Deploying Qt runtime dependencies for StaxStudio tests"
         VERBATIM
     )
-    add_custom_command(TARGET StaxStudioTests POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${STAX_FFMPEG_ROOT}/bin" "$<TARGET_FILE_DIR:StaxStudioTests>"
-        COMMENT "Deploying FFmpeg runtime dependencies for StaxStudio tests"
-    )
 endif()
 
 add_test(NAME StaxStudioTests COMMAND StaxStudioTests)
