@@ -52,7 +52,10 @@ jobs:
           find "$MINGW_PREFIX/include" -name qrhi_p.h -print -quit | grep .
 
       - name: Build application and tests
-        run: cmake --build ../StaxStudio-build --parallel
+        run: |
+          cmake --build ../StaxStudio-build --target StaxStudio --parallel
+          cmake --build ../StaxStudio-build --target StaxStudioTests --parallel
+          cmake --build ../StaxStudio-build --target StaxStudioUiTests --parallel
 
       - name: Run tests
         run: ctest --test-dir ../StaxStudio-build --output-on-failure
