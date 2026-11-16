@@ -389,7 +389,8 @@ foreach(test_case IN LISTS STAX_UI_TEST_CASES)
         COMMAND StaxStudioUiTests ${test_case} -v1 -o -,txt
     )
     set_tests_properties(StaxStudioUiTests_${test_case} PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../share/qt6/plugins;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../share/qt6/plugins/platforms;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../share/qt6/plugins;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../share/qt6/plugins/platforms;QML_IMPORT_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../share/qt6/qml;QML2_IMPORT_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../share/qt6/qml;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"
         TIMEOUT 180
     )
 endforeach()
+

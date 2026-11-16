@@ -85,7 +85,10 @@ jobs:
           export QT_QUICK_BACKEND=software
           export QT_PLUGIN_PATH="$(cygpath -m "$MINGW_PREFIX/share/qt6/plugins")"
           export QT_QPA_PLATFORM_PLUGIN_PATH="$(cygpath -m "$MINGW_PREFIX/share/qt6/plugins/platforms")"
+          export QML_IMPORT_PATH="$(cygpath -m "$MINGW_PREFIX/share/qt6/qml")"
+          export QML2_IMPORT_PATH="$QML_IMPORT_PATH"
           export QT_QPA_FONTDIR="$(cygpath -m "$WINDIR/Fonts")"
+          export QML_IMPORT_TRACE=1
           timeout 20s ../StaxStudio-build/StaxStudioUiTests.exe -functions
           timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe diagnosticsPreferencePersists -v1
           timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe dxgiPointerComposition -v1
@@ -94,3 +97,4 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir ../StaxStudio-build --parallel 4 --stop-on-failure --output-on-failure
+
