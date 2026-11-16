@@ -50,6 +50,8 @@ jobs:
           pacman -Qi mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-qt6-declarative mingw-w64-ucrt-x86_64-qt6-multimedia mingw-w64-ucrt-x86_64-qt6-shadertools mingw-w64-ucrt-x86_64-qt6-tools mingw-w64-ucrt-x86_64-ffmpeg
           command -v qmlimportscanner
           pacman -Ql mingw-w64-ucrt-x86_64-qt6-base | grep '/share/qt6/plugins/platforms/qoffscreen.dll'
+          pacman -Ql mingw-w64-ucrt-x86_64-qt6-declarative | grep 'qtquickcontrols2plugin.dll'
+          find "$MINGW_PREFIX" ../StaxStudio-build -iname qtquickcontrols2plugin.dll -print
           find "$MINGW_PREFIX/include" -name qrhi_p.h -print -quit | grep .
 
       - name: Build application and tests
@@ -87,6 +89,7 @@ jobs:
           timeout 20s ../StaxStudio-build/StaxStudioUiTests.exe -functions
           timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe diagnosticsPreferencePersists -v1
           timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe dxgiPointerComposition -v1
+          export QT_DEBUG_PLUGINS=1
           timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe visibleRowsAndRepeatedLifecycle -v1 -o -,txt
 
       - name: Run tests
