@@ -294,10 +294,6 @@ if(WIN32)
         COMMENT "Deploying Qt runtime dependencies for StaxStudio tests"
         VERBATIM
     )
-    add_custom_command(TARGET StaxStudioTests POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${STAX_FFMPEG_ROOT}/bin" "$<TARGET_FILE_DIR:StaxStudioTests>"
-        COMMENT "Deploying FFmpeg runtime dependencies for StaxStudio tests"
-    )
 endif()
 
 add_test(NAME StaxStudioTests COMMAND StaxStudioTests)
@@ -369,12 +365,30 @@ qt_add_shaders(StaxStudioUiTests "StaxUiTestCompositorShaders"
 target_include_directories(StaxStudioUiTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated ${STAX_FFMPEG_INCLUDE_DIR})
 target_compile_definitions(StaxStudioUiTests PRIVATE STAX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(StaxStudioUiTests PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Multimedia Qt6::Network Qt6::Test ${STAX_FFMPEG_avcodec_LIBRARY} ${STAX_FFMPEG_avformat_LIBRARY} ${STAX_FFMPEG_avutil_LIBRARY} ${STAX_FFMPEG_swresample_LIBRARY} ${STAX_FFMPEG_swscale_LIBRARY} d3d11 dxgi dxguid advapi32 ole32 uuid propsys)
-add_test(NAME StaxStudioUiTests COMMAND StaxStudioUiTests -o -,txt)
 target_link_libraries(StaxStudioUiTests PRIVATE d3dcompiler)
 foreach(target StaxStudio StaxStudioTests StaxStudioUiTests)
     target_sources(${target} PRIVATE ui/controllers/DockLayout.cpp ui/controllers/DockLayout.h)
 endforeach()
-set_tests_properties(StaxStudioUiTests PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"
-    TIMEOUT 150
+set(STAX_UI_TEST_CASES
+    visibleRowsAndRepeatedLifecycle
+    captureConfigurationUsesMonotonicTimestamps
+    offscreenRecordingNeedsNoPreviewWindow
+    draggingUpdatesOnlyOneRenderItem
+    outputSurvivesPreviewDetach
+    gpuPreviewShowsAllCorners
+    dockMouseInteractions
+    dxgiPointerComposition
+    streamPageLoadsWithoutWarnings
+    streamPageLayoutAtVirtualSizes
+    diagnosticsPreferencePersists
+    settingsExposesDiagnosticsControl
 )
+foreach(test_case IN LISTS STAX_UI_TEST_CASES)
+    add_test(NAME StaxStudioUiTests_${test_case}
+        COMMAND StaxStudioUiTests ${test_case} -v1 -o -,txt
+    )
+    set_tests_properties(StaxStudioUiTests_${test_case} PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_FONTDIR=$ENV{WINDIR}/Fonts"
+        TIMEOUT 180
+    )
+endforeach()

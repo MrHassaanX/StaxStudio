@@ -49,10 +49,13 @@ jobs:
           export PATH="$MINGW_PREFIX/share/qt6/bin:$PATH"
           pacman -Qi mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-qt6-declarative mingw-w64-ucrt-x86_64-qt6-multimedia mingw-w64-ucrt-x86_64-qt6-shadertools mingw-w64-ucrt-x86_64-qt6-tools mingw-w64-ucrt-x86_64-ffmpeg
           command -v qmlimportscanner
-          find "$MINGW_PREFIX/include/QtGui" -name qrhi_p.h -print -quit | grep .
+          find "$MINGW_PREFIX/include" -name qrhi_p.h -print -quit | grep .
 
       - name: Build application and tests
-        run: cmake --build ../StaxStudio-build --parallel
+        run: |
+          cmake --build ../StaxStudio-build --target StaxStudio --parallel
+          cmake --build ../StaxStudio-build --target StaxStudioTests --parallel
+          cmake --build ../StaxStudio-build --target StaxStudioUiTests --parallel
 
       - name: Run tests
         run: ctest --test-dir ../StaxStudio-build --output-on-failure
