@@ -87,6 +87,7 @@ jobs:
           timeout 20s ../StaxStudio-build/StaxStudioUiTests.exe -functions
           timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe diagnosticsPreferencePersists -v1
           timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe dxgiPointerComposition -v1
+          timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe visibleRowsAndRepeatedLifecycle -v1 -o -,txt
 
       - name: Run tests
         run: ctest --test-dir ../StaxStudio-build --parallel 4 --stop-on-failure --output-on-failure

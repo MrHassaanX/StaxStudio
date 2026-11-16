@@ -68,7 +68,7 @@ private slots:
 
 void StudioUiTests::init()
 {
-    std::fprintf(stderr, "[UI TEST] %s\\n", QTest::currentTestFunction());
+    std::fprintf(stderr, "[UI TEST] %s\n", QTest::currentTestFunction());
     std::fflush(stderr);
 }
 
@@ -265,11 +265,17 @@ void StudioUiTests::dxgiPointerComposition()
 
 void StudioUiTests::visibleRowsAndRepeatedLifecycle()
 {
+    std::fprintf(stderr, "[visibleRows] entered\n");
+    std::fflush(stderr);
     QTest::failOnWarning(QRegularExpression(".*"));
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
+    std::fprintf(stderr, "[visibleRows] constructing controllers\n");
+    std::fflush(stderr);
     AppController navigation;
     StudioController controller(directory.path());
+    std::fprintf(stderr, "[visibleRows] controllers constructed\n");
+    std::fflush(stderr);
     navigation.setGpuPreviewEnabled(false);
     QAbstractItemModelTester sceneContract(controller.scenesModel(), QAbstractItemModelTester::FailureReportingMode::QtTest);
     QAbstractItemModelTester sourceContract(controller.sceneItemsModel(), QAbstractItemModelTester::FailureReportingMode::QtTest);
@@ -278,12 +284,21 @@ void StudioUiTests::visibleRowsAndRepeatedLifecycle()
     engine.rootContext()->setContextProperty("appController", &navigation);
     engine.rootContext()->setContextProperty("studioController", &controller);
     navigation.setActivePage("studio");
+    std::fprintf(stderr, "[visibleRows] loading QML\n");
+    std::fflush(stderr);
     engine.load(QUrl::fromLocalFile(QStringLiteral(STAX_SOURCE_DIR "/ui/qml/Main.qml")));
+    std::fprintf(stderr, "[visibleRows] QML loaded; roots=%lld\n", static_cast<long long>(engine.rootObjects().size()));
+    std::fflush(stderr);
     QCOMPARE(engine.rootObjects().size(), 1);
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     QVERIFY(window);
     window->resize(1920, 1080);
-    QVERIFY(QTest::qWaitForWindowExposed(window));
+    std::fprintf(stderr, "[visibleRows] waiting for window exposure\n");
+    std::fflush(stderr);
+    const bool exposed = QTest::qWaitForWindowExposed(window);
+    std::fprintf(stderr, "[visibleRows] window exposure=%d\n", exposed ? 1 : 0);
+    std::fflush(stderr);
+    QVERIFY(exposed);
     auto find = [&](const QString &name) { return visualItem(window->contentItem(), name); };
     auto *scenes = controller.scenesModel();
     auto *items = controller.sceneItemsModel();
