@@ -61,18 +61,18 @@ jobs:
       - name: Prepare experimental application artifact
         run: |
           test -f ../StaxStudio-build/StaxStudio.exe
-          mkdir -p ../StaxStudio-package
-          cp ../StaxStudio-build/StaxStudio.exe ../StaxStudio-package/
-          cp ../StaxStudio-build/*.dll ../StaxStudio-package/
+          mkdir -p ci-package
+          cp ../StaxStudio-build/StaxStudio.exe ci-package/
+          cp ../StaxStudio-build/*.dll ci-package/
           for dir in qml plugins resources; do
-            test ! -d "../StaxStudio-build/$dir" || cp -R "../StaxStudio-build/$dir" ../StaxStudio-package/
+            test ! -d "../StaxStudio-build/$dir" || cp -R "../StaxStudio-build/$dir" ci-package/
           done
-          printf '%s\n' 'Experimental / CI-unverified build. Not a stable release.' > ../StaxStudio-package/STATUS.txt
+          printf '%s\n' 'Experimental / CI-unverified build. Not a stable release.' > ci-package/STATUS.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: StaxStudio-windows-ucrt64-experimental-ci-unverified
-          path: ../StaxStudio-package/
+          path: ci-package/
           if-no-files-found: error
           retention-days: 14
           include-hidden-files: false
