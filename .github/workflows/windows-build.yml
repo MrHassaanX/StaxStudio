@@ -49,6 +49,7 @@ jobs:
           export PATH="$MINGW_PREFIX/share/qt6/bin:$PATH"
           pacman -Qi mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-qt6-declarative mingw-w64-ucrt-x86_64-qt6-multimedia mingw-w64-ucrt-x86_64-qt6-shadertools mingw-w64-ucrt-x86_64-qt6-tools mingw-w64-ucrt-x86_64-ffmpeg
           command -v qmlimportscanner
+          pacman -Ql mingw-w64-ucrt-x86_64-qt6-base | grep '/share/qt6/plugins/platforms/qoffscreen.dll'
           find "$MINGW_PREFIX/include" -name qrhi_p.h -print -quit | grep .
 
       - name: Build application and tests
@@ -57,10 +58,7 @@ jobs:
           cmake --build ../StaxStudio-build --target StaxStudioTests --parallel
           cmake --build ../StaxStudio-build --target StaxStudioUiTests --parallel
 
-      - name: Run tests
-        run: ctest --test-dir ../StaxStudio-build --output-on-failure
-
-      - name: Prepare downloadable application
+      - name: Prepare experimental application artifact
         run: |
           test -f ../StaxStudio-build/StaxStudio.exe
           mkdir -p ../StaxStudio-package
@@ -69,11 +67,26 @@ jobs:
           for dir in qml plugins resources; do
             test ! -d "../StaxStudio-build/$dir" || cp -R "../StaxStudio-build/$dir" ../StaxStudio-package/
           done
+          printf '%s\n' 'Experimental / CI-unverified build. Not a stable release.' > ../StaxStudio-package/STATUS.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: StaxStudio-windows-ucrt64
+          name: StaxStudio-windows-ucrt64-experimental-ci-unverified
           path: ../StaxStudio-package/
           if-no-files-found: error
           retention-days: 14
           include-hidden-files: false
+
+      - name: Verify UI test startup
+        run: |
+          export QT_QPA_PLATFORM=offscreen
+          export QT_QUICK_BACKEND=software
+          export QT_PLUGIN_PATH="$(cygpath -m "$MINGW_PREFIX/share/qt6/plugins")"
+          export QT_QPA_PLATFORM_PLUGIN_PATH="$(cygpath -m "$MINGW_PREFIX/share/qt6/plugins/platforms")"
+          export QT_QPA_FONTDIR="$(cygpath -m "$WINDIR/Fonts")"
+          timeout 20s ../StaxStudio-build/StaxStudioUiTests.exe -functions
+          timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe diagnosticsPreferencePersists -v1
+          timeout 45s ../StaxStudio-build/StaxStudioUiTests.exe dxgiPointerComposition -v1
+
+      - name: Run tests
+        run: ctest --test-dir ../StaxStudio-build --parallel 4 --stop-on-failure --output-on-failure

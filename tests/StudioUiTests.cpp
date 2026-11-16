@@ -760,12 +760,23 @@ void StudioUiTests::dockMouseInteractions()
 
 int main(int argc, char **argv)
 {
+    std::fprintf(stderr, "[ui-startup] entering QGuiApplication\n");
+    std::fflush(stderr);
     QGuiApplication app(argc, argv);
+    std::fprintf(stderr, "[ui-startup] QGuiApplication constructed\n");
+    std::fflush(stderr);
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
+    std::fprintf(stderr, "[ui-startup] graphics API selected\n");
+    std::fflush(stderr);
     QQuickStyle::setStyle("Basic");
     qmlRegisterType<ProgramPreview>("StaxStudio.Render", 1, 0, "ProgramPreview");
     StudioUiTests tests;
-    return QTest::qExec(&tests, argc, argv);
+    std::fprintf(stderr, "[ui-startup] entering QTest::qExec\n");
+    std::fflush(stderr);
+    const int result = QTest::qExec(&tests, argc, argv);
+    std::fprintf(stderr, "[ui-startup] QTest::qExec returned %d\n", result);
+    std::fflush(stderr);
+    return result;
 }
 
 #include "StudioUiTests.moc"
