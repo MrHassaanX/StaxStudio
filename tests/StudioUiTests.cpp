@@ -284,6 +284,14 @@ void StudioUiTests::visibleRowsAndRepeatedLifecycle()
     engine.rootContext()->setContextProperty("appController", &navigation);
     engine.rootContext()->setContextProperty("studioController", &controller);
     navigation.setActivePage("studio");
+    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &engine,
+                     [](const QList<QQmlError> &warnings) {
+        for (const QQmlError &warning : warnings) {
+            const QByteArray message = warning.toString().toLocal8Bit();
+            std::fprintf(stderr, "[QML WARNING] %s\n", message.constData());
+            std::fflush(stderr);
+        }
+    });
     std::fprintf(stderr, "[visibleRows] loading QML\n");
     std::fflush(stderr);
     engine.load(QUrl::fromLocalFile(QStringLiteral(STAX_SOURCE_DIR "/ui/qml/Main.qml")));
