@@ -59,7 +59,6 @@ Item {
     StudioDialog {
         id: confirmStream
         objectName: "confirmStreamDialog"
-        objectName: "confirmStreamDialog"
         title: "Confirm broadcast"
         parent: Overlay.overlay
         anchors.centerIn: parent
