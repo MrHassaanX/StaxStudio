@@ -806,6 +806,13 @@ void StudioUiTests::phaseBNavigationAndPreflight()
         auto *dialog=window->findChild<QObject *>("preStreamDialog"); QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("visible").toBool());
 
+        QCOMPARE(controller.streamer()->property("state").toString(), QString("Idle"));
+        auto *primary=visualItem(window->contentItem(), "streamPrimaryAction"); QVERIFY(primary);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, primary->mapToScene({primary->width()/2,primary->height()/2}).toPoint());
+        auto *confirmation=window->findChild<QObject *>("confirmStreamDialog"); QVERIFY(confirmation);
+        QTRY_VERIFY(confirmation->property("visible").toBool());
+        QCOMPARE(controller.streamer()->property("state").toString(), QString("Idle"));
+        QVERIFY(QMetaObject::invokeMethod(confirmation,"close"));
         QVERIFY(QMetaObject::invokeMethod(dialog,"close"));
     }
     navigation.setActivePage("settings"); QTest::qWait(100);
