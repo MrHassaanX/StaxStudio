@@ -308,6 +308,9 @@ void StudioUiTests::visibleRowsAndRepeatedLifecycle()
     std::fprintf(stderr, "[visibleRows] window exposure=%d\n", exposed ? 1 : 0);
     std::fflush(stderr);
     QVERIFY(exposed);
+    auto *reveal = window->findChild<QObject *>("startupReveal");
+    QVERIFY(reveal);
+    QTRY_COMPARE(reveal->property("opacity").toDouble(), 0.0);
     auto find = [&](const QString &name) { return visualItem(window->contentItem(), name); };
     auto *scenes = controller.scenesModel();
     auto *items = controller.sceneItemsModel();

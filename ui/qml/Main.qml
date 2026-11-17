@@ -19,6 +19,7 @@ ApplicationWindow {
     property bool reducedMotion: appearance.reducedMotion
     Rectangle {
         anchors.fill: parent
+        objectName: "startupReveal"
         z: 100
         color: "#0F171A"
         visible: opacity > 0
