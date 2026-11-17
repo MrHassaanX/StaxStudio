@@ -18,7 +18,17 @@ Canvas {
         ctx.lineJoin = "round"
         const w = width
         const h = height
-        if (name === "add") {
+        if (name === "studio" || name === "library") {
+            ctx.strokeRect(w*.15,h*.2,w*.7,h*.6)
+            ctx.beginPath(); ctx.moveTo(w*.15,h*.4); ctx.lineTo(w*.85,h*.4); ctx.stroke()
+            if (name === "studio") { ctx.beginPath(); ctx.moveTo(w*.4,h*.4); ctx.lineTo(w*.4,h*.8); ctx.stroke() }
+        } else if (name === "record") {
+            ctx.beginPath(); ctx.arc(w*.5,h*.5,w*.29,0,Math.PI*2); ctx.stroke()
+            ctx.beginPath(); ctx.arc(w*.5,h*.5,w*.12,0,Math.PI*2); ctx.fill()
+        } else if (name === "settings") {
+            ctx.beginPath(); ctx.arc(w*.5,h*.5,w*.2,0,Math.PI*2); ctx.stroke()
+            for(let i=0;i<8;i++) { const a=i*Math.PI/4; ctx.beginPath(); ctx.moveTo(w*(.5+.3*Math.cos(a)),h*(.5+.3*Math.sin(a))); ctx.lineTo(w*(.5+.42*Math.cos(a)),h*(.5+.42*Math.sin(a))); ctx.stroke() }
+        } else if (name === "add") {
             ctx.beginPath(); ctx.moveTo(w * .5, h * .22); ctx.lineTo(w * .5, h * .78); ctx.moveTo(w * .22, h * .5); ctx.lineTo(w * .78, h * .5); ctx.stroke()
         } else if (name === "more") {
             for (let x of [w * .27, w * .5, w * .73]) { ctx.beginPath(); ctx.arc(x, h * .5, 1.35, 0, Math.PI * 2); ctx.fill() }

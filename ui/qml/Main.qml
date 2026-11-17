@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore as Core
 import "components"
 
 ApplicationWindow {
@@ -14,7 +15,8 @@ ApplicationWindow {
     title: "StaxStudio"
     color: "#0F171A"
 
-    property bool reducedMotion: !Qt.styleHints.cursorFlashTime
+    Core.Settings { id: appearance; category: "Appearance"; property bool reducedMotion: false }
+    property bool reducedMotion: appearance.reducedMotion
     Rectangle {
         anchors.fill: parent
         z: 100

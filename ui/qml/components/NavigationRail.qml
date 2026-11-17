@@ -65,10 +65,10 @@ Item {
 
             Repeater {
                 model: [
-                    { "page": "studio", "label": "Studio", "number": "▣" },
-                    { "page": "record", "label": "Quick Record", "number": "●" },
-                    { "page": "library", "label": "Library", "number": "▤" },
-                    { "page": "settings", "label": "Settings", "number": "⚙" }
+                    { "page": "studio", "label": "Studio", "number": "studio" },
+                    { "page": "record", "label": "Quick Record", "number": "record" },
+                    { "page": "library", "label": "Library", "number": "library" },
+                    { "page": "settings", "label": "Settings", "number": "settings" }
                 ]
 
                 delegate: Rectangle {
@@ -84,16 +84,15 @@ Item {
                     radius: 6
                     color: selected ? "#25434A" : (hovering ? "#1C3037" : "transparent")
 
-                    Text {
+                    StudioIcon {
+                        width: 18; height: 18
                         anchors {
                             left: parent.left
                         leftMargin: 12
                             verticalCenter: parent.verticalCenter
                         }
-                        text: navigationItem.modelData.number
+                        name: navigationItem.modelData.number
                         color: navigationItem.selected ? "#E9FB81" : "#779096"
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
                     }
 
                     Text {

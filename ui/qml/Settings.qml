@@ -2,12 +2,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import QtCore as Core
 import "components"
 
 Item {
     id: root
     objectName: "settingsPage"
     anchors.fill: parent
+    Core.Settings { id: appearance; category: "Appearance"; property bool reducedMotion: false }
     property string section: "General"
     property string exportMessage: ""
 
@@ -81,8 +83,9 @@ Item {
                     StudioButton { text: "Export Diagnostics"; onClicked: exportDialog.open() }
                     Text { visible: root.exportMessage.length > 0; text: root.exportMessage; color: "#A7D56C"; font.pixelSize: 12 }
                 }
-                Stream { Layout.fillWidth: true; Layout.fillHeight: true; visible: root.section === "Stream" }
-                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: ["General", "Stream", "Advanced"].indexOf(root.section) < 0; text: root.section + " preferences are unavailable in this milestone. Use existing Studio controls for output and canvas settings."; color: "#8FA3A7" }
+                Item { Layout.fillWidth: true; Layout.fillHeight: true; visible: root.section === "Stream"; Stream { anchors.fill: parent } }
+                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: ["General", "Stream", "Appearance", "Advanced"].indexOf(root.section) < 0; text: root.section + " preferences are unavailable in this milestone. Use existing Studio controls for output and canvas settings."; color: "#8FA3A7" }
+                StudioCheckBox { visible: root.section === "Appearance"; text: "Reduce motion (applies at next launch)"; checked: appearance.reducedMotion; onToggled: appearance.reducedMotion = checked }
                 Item { Layout.fillHeight: true; visible: root.section !== "Stream" }
             }
         }
