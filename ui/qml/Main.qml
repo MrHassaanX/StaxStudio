@@ -12,8 +12,18 @@ ApplicationWindow {
     minimumHeight: 640
     visible: true
     title: "StaxStudio"
-    color: "#F5F7F8"
+    color: "#0F171A"
 
+    property bool reducedMotion: !Qt.styleHints.cursorFlashTime
+    Rectangle {
+        anchors.fill: parent
+        z: 100
+        color: "#0F171A"
+        visible: opacity > 0
+        enabled: false
+        Text { anchors.centerIn: parent; text: "StaxStudio"; color: "#B7E65C"; font.pixelSize: 32; font.weight: Font.DemiBold }
+        NumberAnimation on opacity { from: 1; to: 0; duration: root.reducedMotion ? 0 : 280; running: true }
+    }
     function pageComponent(pageName) {
         if (pageName === "record") {
             return recordPage
@@ -39,13 +49,13 @@ ApplicationWindow {
 
         NavigationRail {
             Layout.fillHeight: true
-            Layout.preferredWidth: 210
+            Layout.preferredWidth: 184
         }
 
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: "#F5F7F8"
+            color: "#0F171A"
 
             Loader {
                 anchors.fill: parent
@@ -84,3 +94,4 @@ ApplicationWindow {
         Settings { }
     }
 }
+

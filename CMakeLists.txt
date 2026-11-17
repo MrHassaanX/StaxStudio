@@ -371,6 +371,7 @@ foreach(target StaxStudio StaxStudioTests StaxStudioUiTests)
     target_sources(${target} PRIVATE ui/controllers/DockLayout.cpp ui/controllers/DockLayout.h)
 endforeach()
 set(STAX_UI_TEST_CASES
+    phaseBNavigationAndPreflight
     visibleRowsAndRepeatedLifecycle
     captureConfigurationUsesMonotonicTimestamps
     offscreenRecordingNeedsNoPreviewWindow

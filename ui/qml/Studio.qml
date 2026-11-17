@@ -21,6 +21,17 @@ Item {
     property var propertyConfiguration: ({})
     property string pendingPreviewTransformItemId: ""
     property var pendingPreviewTransform: ({})
+    StudioDialog {
+        id: preStream
+        objectName: "preStreamDialog"
+        title: "Prepare your stream"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 32, 1120)
+        height: Math.min(parent.height - 32, 760)
+        standardButtons: Dialog.Close
+        Stream { anchors.fill: parent }
+    }
     function formatElapsed(ms) {
         const seconds = Math.floor(ms / 1000)
         const hours = Math.floor(seconds / 3600)
@@ -469,9 +480,9 @@ Item {
                             objectName: "streamingButton"
                             Layout.fillWidth: true
                             implicitHeight: 34
-                            text: studioController.streamer.state === "Live" || studioController.streamer.state === "Connecting" || studioController.streamer.state === "Reconnecting" ? "Stop streaming" : "Start streaming"
+                            text: studioController.streamer.state === "Live" || studioController.streamer.state === "Connecting" || studioController.streamer.state === "Reconnecting" ? "Stop streaming" : "Go Live"
                             enabled: studioController.streamer.state !== "Stopping"
-                            onClicked: studioController.toggleStreaming()
+                            onClicked: { if (studioController.streamer.state === "Live" || studioController.streamer.state === "Connecting" || studioController.streamer.state === "Reconnecting") studioController.toggleStreaming(); else preStream.open() }
                             ToolTip.visible: hovered
                             ToolTip.text: studioController.streamer.state === "Error" ? studioController.streamer.errorMessage : "Stream the program to the Custom RTMP destination."
                         }
@@ -621,3 +632,4 @@ Item {
         onTransformAccepted: values => studioController.setItemTransform(sceneItemId, values)
     }
 }
+

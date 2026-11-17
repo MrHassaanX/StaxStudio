@@ -64,6 +64,7 @@ private slots:
     void streamPageLayoutAtVirtualSizes();
     void diagnosticsPreferencePersists();
     void settingsExposesDiagnosticsControl();
+    void phaseBNavigationAndPreflight();
 };
 
 void StudioUiTests::init()
@@ -781,6 +782,35 @@ void StudioUiTests::dockMouseInteractions()
     QVERIFY(find("mixerPanel")->isVisible());
 }
 
+void StudioUiTests::phaseBNavigationAndPreflight()
+{
+    QTest::failOnWarning(QRegularExpression(".*"));
+    QTemporaryDir directory;
+    AppController navigation; StudioController controller(directory.path());
+    QCOMPARE(navigation.activePage(), QString("studio"));
+    navigation.setGpuPreviewEnabled(false);
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("appController", &navigation);
+    engine.rootContext()->setContextProperty("studioController", &controller);
+    engine.load(QUrl::fromLocalFile(QStringLiteral(STAX_SOURCE_DIR "/ui/qml/Main.qml")));
+    QCOMPARE(engine.rootObjects().size(), 1);
+    auto *window=qobject_cast<QQuickWindow *>(engine.rootObjects().first()); QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    for (auto size : {QSize(1280,720), QSize(1600,900), QSize(1920,1080)}) {
+        window->resize(size); QTest::qWait(300);
+        auto *button=visualItem(window->contentItem(), "streamingButton"); QVERIFY(button);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, button->mapToScene({button->width()/2,button->height()/2}).toPoint());
+        auto *dialog=window->findChild<QObject *>("preStreamDialog"); QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+
+        QVERIFY(QMetaObject::invokeMethod(dialog,"close"));
+    }
+    navigation.setActivePage("settings"); QTest::qWait(100);
+    auto *page=window->findChild<QObject *>("settingsPage"); QVERIFY(page);
+    page->setProperty("section", "Stream"); QTest::qWait(100);
+    QVERIFY(visualItem(window->contentItem(), "streamSetupPage"));
+}
+
 int main(int argc, char **argv)
 {
     std::fprintf(stderr, "[ui-startup] entering QGuiApplication\n");
@@ -803,3 +833,4 @@ int main(int argc, char **argv)
 }
 
 #include "StudioUiTests.moc"
+

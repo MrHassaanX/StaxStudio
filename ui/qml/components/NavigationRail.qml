@@ -65,16 +65,15 @@ Item {
 
             Repeater {
                 model: [
-                    { "page": "home", "label": "Home", "number": "01" },
-                    { "page": "studio", "label": "Studio", "number": "02" },
-                    { "page": "record", "label": "Quick Record", "number": "03" },
-                    { "page": "stream", "label": "Stream Setup", "number": "04" },
-                    { "page": "library", "label": "Library", "number": "05" },
-                    { "page": "settings", "label": "Settings", "number": "06" }
+                    { "page": "studio", "label": "Studio", "number": "▣" },
+                    { "page": "record", "label": "Quick Record", "number": "●" },
+                    { "page": "library", "label": "Library", "number": "▤" },
+                    { "page": "settings", "label": "Settings", "number": "⚙" }
                 ]
 
                 delegate: Rectangle {
                     id: navigationItem
+                    objectName: "navigation_" + modelData.page
 
                     required property var modelData
                     property bool selected: root.currentPage === modelData.page
@@ -166,3 +165,4 @@ Item {
         }
     }
 }
+

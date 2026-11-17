@@ -29,10 +29,22 @@ Item {
         spacing: 16
         Text { text: "Settings"; color: "#F5F8F8"; font.pixelSize: 22; font.weight: Font.DemiBold }
         RowLayout {
-            spacing: 8
-            StudioButton { text: "General"; checked: root.section === "General"; onClicked: root.section = "General" }
-            StudioButton { text: "Advanced"; checked: root.section === "Advanced"; onClicked: root.section = "Advanced" }
-        }
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            ColumnLayout {
+                Layout.preferredWidth: 130
+                Layout.alignment: Qt.AlignTop
+                Repeater {
+                    model: ["General", "Stream", "Output", "Audio", "Video", "Hotkeys", "Appearance", "Advanced"]
+                    delegate: StudioButton {
+                        required property string modelData
+                        objectName: "settingsCategory_" + modelData
+                        text: modelData
+                        checked: root.section === modelData
+                        onClicked: root.section = modelData
+                    }
+                }
+            }
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -69,8 +81,12 @@ Item {
                     StudioButton { text: "Export Diagnostics"; onClicked: exportDialog.open() }
                     Text { visible: root.exportMessage.length > 0; text: root.exportMessage; color: "#A7D56C"; font.pixelSize: 12 }
                 }
-                Item { Layout.fillHeight: true }
+                Stream { Layout.fillWidth: true; Layout.fillHeight: true; visible: root.section === "Stream" }
+                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: ["General", "Stream", "Advanced"].indexOf(root.section) < 0; text: root.section + " preferences are unavailable in this milestone. Use existing Studio controls for output and canvas settings."; color: "#8FA3A7" }
+                Item { Layout.fillHeight: true; visible: root.section !== "Stream" }
             }
+        }
         }
     }
 }
+

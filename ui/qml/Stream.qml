@@ -56,6 +56,17 @@ Item {
         studioController.selectStreamDestination(id)
     }
 
+    StudioDialog {
+        id: confirmStream
+        objectName: "confirmStreamDialog"
+        title: "Confirm broadcast"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 48, 460)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        Label { width: parent.width; wrapMode: Text.WordWrap; color: "#EAF0F1"; text: "Start output to " + root.selectedProvider + " with these broadcast settings? Check privacy, title and audio before continuing." }
+        onAccepted: root.primaryAction()
+    }
     function primaryAction() {
         if (selectedProvider === "custom-rtmp") {
             saveSettings()
@@ -281,7 +292,7 @@ Item {
                                    : root.selectedProvider === "twitch"
                                      ? studioController.twitchStreamActive || (root.connectionState === "Ready to stream" && !root.outputBusy)
                                      : root.connectionState === "Connected"
-                        onClicked: root.primaryAction()
+                        onClicked: { if (studioController.streamer.state === "Live" || studioController.youtubeStreamActive || studioController.twitchStreamActive || root.selectedProvider === "kick") root.primaryAction(); else confirmStream.open() }
                     }
                 }
                 RowLayout {
@@ -312,3 +323,4 @@ Item {
         }
     }
 }
+

@@ -28,6 +28,7 @@ signals:
     void actionRequested(const QString &actionName);
 
 private:
-    QString activePage_ = QStringLiteral("home");
+    QString activePage_ = QStringLiteral("studio");
     bool gpuPreviewEnabled_ = true;
 };
+
