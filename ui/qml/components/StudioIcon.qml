@@ -28,6 +28,14 @@ Canvas {
         } else if (name === "settings") {
             ctx.beginPath(); ctx.arc(w*.5,h*.5,w*.2,0,Math.PI*2); ctx.stroke()
             for(let i=0;i<8;i++) { const a=i*Math.PI/4; ctx.beginPath(); ctx.moveTo(w*(.5+.3*Math.cos(a)),h*(.5+.3*Math.sin(a))); ctx.lineTo(w*(.5+.42*Math.cos(a)),h*(.5+.42*Math.sin(a))); ctx.stroke() }
+        } else if (name === "studio") {
+            ctx.strokeRect(w*.15,h*.18,w*.7,h*.55); ctx.beginPath(); ctx.moveTo(w*.35,h*.85); ctx.lineTo(w*.65,h*.85); ctx.stroke()
+        } else if (name === "record") {
+            ctx.beginPath(); ctx.arc(w*.5,h*.5,w*.3,0,Math.PI*2); ctx.stroke(); ctx.beginPath(); ctx.arc(w*.5,h*.5,w*.15,0,Math.PI*2); ctx.fill()
+        } else if (name === "library") {
+            ctx.strokeRect(w*.15,h*.2,w*.7,h*.65); ctx.beginPath(); ctx.moveTo(w*.3,h*.1); ctx.lineTo(w*.7,h*.1); ctx.moveTo(w*.4,h*.38); ctx.lineTo(w*.65,h*.53); ctx.lineTo(w*.4,h*.68); ctx.closePath(); ctx.stroke()
+        } else if (name === "settings") {
+            ctx.beginPath(); ctx.arc(w*.5,h*.5,w*.28,0,Math.PI*2); ctx.stroke(); ctx.beginPath(); ctx.arc(w*.5,h*.5,w*.1,0,Math.PI*2); ctx.stroke(); for(let i=0;i<8;i++){ const a=i*Math.PI/4;ctx.beginPath();ctx.moveTo(w*(.5+.28*Math.cos(a)),h*(.5+.28*Math.sin(a)));ctx.lineTo(w*(.5+.4*Math.cos(a)),h*(.5+.4*Math.sin(a)));ctx.stroke() }
         } else if (name === "add") {
             ctx.beginPath(); ctx.moveTo(w * .5, h * .22); ctx.lineTo(w * .5, h * .78); ctx.moveTo(w * .22, h * .5); ctx.lineTo(w * .78, h * .5); ctx.stroke()
         } else if (name === "more") {

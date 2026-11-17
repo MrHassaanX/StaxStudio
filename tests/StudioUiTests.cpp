@@ -816,6 +816,8 @@ int main(int argc, char **argv)
     std::fprintf(stderr, "[ui-startup] entering QGuiApplication\n");
     std::fflush(stderr);
     QGuiApplication app(argc, argv);
+    QCoreApplication::setOrganizationName("StaxStudio");
+    QCoreApplication::setApplicationName("StaxStudioUiTests");
     std::fprintf(stderr, "[ui-startup] QGuiApplication constructed\n");
     std::fflush(stderr);
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
